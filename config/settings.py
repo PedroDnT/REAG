@@ -20,3 +20,18 @@ class Config:
     # Configurações de análise
     ANOMALY_Z_SCORE_THRESHOLD = 3.0
     FLOW_WINDOW_DAYS = 10
+
+    # Período de análise padrão (com dados disponíveis)
+    DEFAULT_START_YEAR = 2024
+    DEFAULT_START_MONTH = 1
+    DEFAULT_END_YEAR = 2024
+    DEFAULT_END_MONTH = 12  # Ajustar conforme disponibilidade
+
+    # Disponibilidade conhecida de dados
+    CDA_START_DATE = (2023, 1)  # CDA disponível a partir de Jan/2023
+    INFORME_START_DATE = (2021, 1)  # Informe disponível a partir de Jan/2021
+
+    # Comportamento de download
+    DOWNLOAD_CHECK_AVAILABILITY = True  # Verificar antes de baixar
+    DOWNLOAD_MAX_RETRIES = 4  # Tentativas com backoff exponencial
+    DOWNLOAD_TIMEOUT = 30  # Timeout em segundos
