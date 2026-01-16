@@ -11,7 +11,6 @@ ENV/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
 
 # Data
 data/raw/*
