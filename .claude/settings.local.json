@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(superpowers:writing-plans)",
+      "mcp__jina__read_url",
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(python -m pytest:*)",
+      "Skill(superpowers:executing-plans)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "jarvis-mcp",
+    "supabase"
+  ]
+}
