@@ -12,7 +12,10 @@
       "Bash(python3:*)",
       "Bash(source venv/bin/activate:*)",
       "Bash(pip install:*)",
-      "Bash(gh repo create:*)"
+      "Bash(gh repo create:*)",
+      "Bash(pytest:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

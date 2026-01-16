@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 from datetime import date
 from tqdm import tqdm
+import zipfile
 from config.settings import Config
 
 
@@ -20,12 +21,12 @@ class CVMCollector:
         self.config.PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     def get_informe_diario_url(self, year: int, month: int) -> str:
-        """Retorna URL do Informe Diário para ano/mês específico"""
-        return f"{self.config.CVM_INFORME_DIARIO_URL}/inf_diario_fi_{year}{month:02d}.csv"
+        """Retorna URL do Informe Diário para ano/mês específico (ZIP)"""
+        return f"{self.config.CVM_INFORME_DIARIO_URL}/inf_diario_fi_{year}{month:02d}.zip"
 
     def get_cda_url(self, year: int, month: int) -> str:
-        """Retorna URL do CDA para ano/mês específico"""
-        return f"{self.config.CVM_CDA_URL}/cda_fi_{year}{month:02d}.csv"
+        """Retorna URL do CDA para ano/mês específico (ZIP)"""
+        return f"{self.config.CVM_CDA_URL}/cda_fi_{year}{month:02d}.zip"
 
     def get_cadastro_url(self, year: int, month: int) -> str:
         """Retorna URL do Cadastro para ano/mês específico"""
@@ -50,31 +51,90 @@ class CVMCollector:
             print(f"Erro ao baixar {url}: {e}")
             return False
 
+    def extract_zip(self, zip_path: Path, extract_to: Optional[Path] = None) -> Optional[Path]:
+        """Extrai arquivo ZIP e retorna caminho do CSV extraído"""
+        try:
+            if extract_to is None:
+                extract_to = zip_path.parent
+
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                # Lista arquivos no ZIP
+                file_list = zip_ref.namelist()
+                csv_files = [f for f in file_list if f.endswith('.csv')]
+
+                if not csv_files:
+                    print(f"Nenhum arquivo CSV encontrado em {zip_path}")
+                    return None
+
+                # Extrai o CSV (assume que há apenas um CSV por ZIP)
+                csv_filename = csv_files[0]
+                zip_ref.extract(csv_filename, extract_to)
+
+                extracted_path = extract_to / csv_filename
+                print(f"Extraído: {extracted_path}")
+                return extracted_path
+
+        except Exception as e:
+            print(f"Erro ao extrair {zip_path}: {e}")
+            return None
+
     def download_informe_diario(self, year: int, month: int) -> Optional[Path]:
-        """Baixa Informe Diário para ano/mês específico"""
+        """Baixa e extrai Informe Diário para ano/mês específico"""
         url = self.get_informe_diario_url(year, month)
-        filename = f"informe_diario_{year}{month:02d}.csv"
-        output_path = self.config.RAW_DATA_DIR / filename
+        csv_filename = f"inf_diario_fi_{year}{month:02d}.csv"
+        csv_path = self.config.RAW_DATA_DIR / csv_filename
 
-        if output_path.exists():
-            print(f"Arquivo já existe: {output_path}")
-            return output_path
+        # Verifica se CSV já existe
+        if csv_path.exists():
+            print(f"Arquivo já existe: {csv_path}")
+            return csv_path
 
-        success = self.download_file(url, output_path)
-        return output_path if success else None
+        # Download do ZIP
+        zip_filename = f"inf_diario_fi_{year}{month:02d}.zip"
+        zip_path = self.config.RAW_DATA_DIR / zip_filename
+
+        if not zip_path.exists():
+            success = self.download_file(url, zip_path)
+            if not success:
+                return None
+
+        # Extrai ZIP
+        extracted_path = self.extract_zip(zip_path)
+
+        # Remove ZIP após extração bem-sucedida
+        if extracted_path and zip_path.exists():
+            zip_path.unlink()
+
+        return extracted_path
 
     def download_cda(self, year: int, month: int) -> Optional[Path]:
-        """Baixa CDA para ano/mês específico"""
+        """Baixa e extrai CDA para ano/mês específico"""
         url = self.get_cda_url(year, month)
-        filename = f"cda_{year}{month:02d}.csv"
-        output_path = self.config.RAW_DATA_DIR / filename
+        csv_filename = f"cda_fi_{year}{month:02d}.csv"
+        csv_path = self.config.RAW_DATA_DIR / csv_filename
 
-        if output_path.exists():
-            print(f"Arquivo já existe: {output_path}")
-            return output_path
+        # Verifica se CSV já existe
+        if csv_path.exists():
+            print(f"Arquivo já existe: {csv_path}")
+            return csv_path
 
-        success = self.download_file(url, output_path)
-        return output_path if success else None
+        # Download do ZIP
+        zip_filename = f"cda_fi_{year}{month:02d}.zip"
+        zip_path = self.config.RAW_DATA_DIR / zip_filename
+
+        if not zip_path.exists():
+            success = self.download_file(url, zip_path)
+            if not success:
+                return None
+
+        # Extrai ZIP
+        extracted_path = self.extract_zip(zip_path)
+
+        # Remove ZIP após extração bem-sucedida
+        if extracted_path and zip_path.exists():
+            zip_path.unlink()
+
+        return extracted_path
 
     def download_cadastro(self, year: int, month: int) -> Optional[Path]:
         """Baixa Cadastro para ano/mês específico"""
