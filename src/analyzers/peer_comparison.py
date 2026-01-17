@@ -222,9 +222,11 @@ class PeerComparisonAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('return_zscore', ascending=False)
-
-        print(f"\n✅ Comparação concluída: {len(result_df)} fundos analisados")
-        print(f"⚠️  Outliers detectados: {result_df['is_outlier'].sum()}")
+            print(f"\n✅ Comparação concluída: {len(result_df)} fundos analisados")
+            print(f"⚠️  Outliers detectados: {result_df['is_outlier'].sum()}")
+        else:
+            print(f"\n✅ Comparação concluída: {len(result_df)} fundos analisados")
+            print("ℹ️  Nenhum fundo com peers suficientes para comparação")
 
         return result_df
 
