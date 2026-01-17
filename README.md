@@ -14,8 +14,10 @@ Identificar irregularidades e padrões suspeitos nos fundos administrados pela R
 ## 📊 Fontes de Dados
 
 - **CVM Dados Abertos**: Informe Diário, CDA, Cadastro
-- **Período**: Configurável (padrão: 2024)
-- **Atualização**: Mensal pela CVM
+- **Formato**: ZIP comprimido (desde maio/2022)
+- **Período**: Últimos 12 meses disponíveis no portal
+- **Atualização**: Diária (meses corrente e anterior), semanal (demais meses)
+- **Histórico**: Dados anteriores a 12 meses devem ser baixados do arquivo histórico
 
 ## 🚀 Instalação
 
