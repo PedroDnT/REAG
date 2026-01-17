@@ -1,10 +1,11 @@
 import requests
 import pandas as pd
 from pathlib import Path
-from typing import Optional
-from datetime import date
+from typing import Optional, List, Tuple
+from datetime import date, datetime
 from tqdm import tqdm
 import zipfile
+import time
 from config.settings import Config
 
 
@@ -20,6 +21,58 @@ class CVMCollector:
         self.config.RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.config.PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    def check_file_exists(self, url: str) -> bool:
+        """
+        Verifica se arquivo existe na CVM usando HEAD request
+
+        Args:
+            url: URL do arquivo a verificar
+
+        Returns:
+            True se arquivo existe (HTTP 200), False caso contrário
+        """
+        try:
+            response = requests.head(url, timeout=10, allow_redirects=True)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Erro ao verificar {url}: {e}")
+            return False
+
+    def get_available_months(self, data_type: str = 'informe_diario',
+                            start_year: int = 2021,
+                            end_year: int = 2026) -> List[Tuple[int, int]]:
+        """
+        Lista meses disponíveis na CVM para um tipo de dado
+
+        Args:
+            data_type: 'informe_diario' ou 'cda'
+            start_year: Ano inicial para verificar
+            end_year: Ano final para verificar
+
+        Returns:
+            Lista de tuplas (year, month) disponíveis
+        """
+        available = []
+        current_date = datetime.now()
+
+        for year in range(start_year, end_year + 1):
+            for month in range(1, 13):
+                # Não verificar meses futuros
+                if year * 12 + month > current_date.year * 12 + current_date.month:
+                    break
+
+                if data_type == 'informe_diario':
+                    url = self.get_informe_diario_url(year, month)
+                elif data_type == 'cda':
+                    url = self.get_cda_url(year, month)
+                else:
+                    continue
+
+                if self.check_file_exists(url):
+                    available.append((year, month))
+
+        return available
+
     def get_informe_diario_url(self, year: int, month: int) -> str:
         """Retorna URL do Informe Diário para ano/mês específico (ZIP)"""
         return f"{self.config.CVM_INFORME_DIARIO_URL}/inf_diario_fi_{year}{month:02d}.zip"
@@ -32,24 +85,59 @@ class CVMCollector:
         """Retorna URL do Cadastro para ano/mês específico"""
         return f"{self.config.CVM_CADASTRO_URL}/cad_fi_{year}{month:02d}.csv"
 
-    def download_file(self, url: str, output_path: Path) -> bool:
-        """Baixa arquivo da URL e salva localmente"""
-        try:
-            response = requests.get(url, stream=True, timeout=30)
-            response.raise_for_status()
+    def download_file(self, url: str, output_path: Path, max_retries: int = 4) -> bool:
+        """
+        Baixa arquivo da URL e salva localmente com retry logic
 
-            total_size = int(response.headers.get('content-length', 0))
+        Args:
+            url: URL do arquivo
+            output_path: Caminho de saída
+            max_retries: Número máximo de tentativas (padrão: 4)
 
-            with open(output_path, 'wb') as f:
-                with tqdm(total=total_size, unit='B', unit_scale=True, desc=output_path.name) as pbar:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        pbar.update(len(chunk))
+        Returns:
+            True se sucesso, False caso contrário
+        """
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, stream=True, timeout=30)
+                response.raise_for_status()
 
-            return True
-        except Exception as e:
-            print(f"Erro ao baixar {url}: {e}")
-            return False
+                total_size = int(response.headers.get('content-length', 0))
+
+                with open(output_path, 'wb') as f:
+                    with tqdm(total=total_size, unit='B', unit_scale=True, desc=output_path.name) as pbar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                            pbar.update(len(chunk))
+
+                return True
+
+            except requests.exceptions.HTTPError as e:
+                # Erros 4xx (cliente) não devem ter retry
+                if 400 <= e.response.status_code < 500:
+                    print(f"Erro HTTP {e.response.status_code}: {url}")
+                    return False
+
+                # Erros 5xx (servidor) podem ter retry
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s
+                    print(f"Erro no download (tentativa {attempt + 1}/{max_retries}). "
+                          f"Aguardando {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"Falha após {max_retries} tentativas: {url}")
+                    return False
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"Erro: {e}. Tentando novamente em {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"Erro ao baixar {url}: {e}")
+                    return False
+
+        return False
 
     def extract_zip(self, zip_path: Path, extract_to: Optional[Path] = None) -> Optional[Path]:
         """Extrai arquivo ZIP e retorna caminho do CSV extraído"""
@@ -136,10 +224,23 @@ class CVMCollector:
 
         return extracted_path
 
-    def download_cadastro(self, year: int, month: int) -> Optional[Path]:
-        """Baixa Cadastro para ano/mês específico"""
-        url = self.get_cadastro_url(year, month)
-        filename = f"cadastro_{year}{month:02d}.csv"
+    def download_cadastro(self, use_current: bool = True) -> Optional[Path]:
+        """
+        Baixa Cadastro de Fundos
+
+        Args:
+            use_current: Se True, baixa arquivo atual (cad_fi.csv)
+                         Se False, baixa histórico completo (cad_fi_hist.zip)
+
+        Nota: Cadastro NÃO é mensal - é um arquivo único atualizado regularmente
+        """
+        if use_current:
+            url = f"{self.config.CVM_CADASTRO_URL}/cad_fi.csv"
+            filename = "cad_fi.csv"
+        else:
+            url = f"{self.config.CVM_CADASTRO_URL}/cad_fi_hist.zip"
+            filename = "cad_fi_hist.zip"
+
         output_path = self.config.RAW_DATA_DIR / filename
 
         if output_path.exists():
@@ -147,14 +248,39 @@ class CVMCollector:
             return output_path
 
         success = self.download_file(url, output_path)
+
+        # Se for ZIP, extrair
+        if success and filename.endswith('.zip'):
+            extracted_path = self.extract_zip(output_path)
+            if extracted_path and output_path.exists():
+                output_path.unlink()  # Remove ZIP após extração
+            return extracted_path
+
         return output_path if success else None
 
     def download_period(self, start_year: int, start_month: int,
                        end_year: int, end_month: int,
-                       data_types: list[str] = ['informe_diario', 'cda', 'cadastro']):
-        """Baixa dados para um período completo"""
+                       data_types: List[str] = ['informe_diario', 'cda', 'cadastro'],
+                       check_availability: bool = True):
+        """
+        Baixa dados para um período completo
+
+        Args:
+            start_year, start_month: Período inicial
+            end_year, end_month: Período final
+            data_types: Tipos de dados para baixar
+            check_availability: Se True, verifica disponibilidade antes de baixar
+        """
         results = []
 
+        # Baixar Cadastro (arquivo único, não mensal)
+        if 'cadastro' in data_types:
+            print("\n=== Baixando Cadastro (arquivo único) ===")
+            path = self.download_cadastro(use_current=True)
+            if path:
+                results.append(('cadastro', None, None, path))
+
+        # Para dados mensais (Informe Diário e CDA)
         current_year = start_year
         current_month = start_month
 
@@ -162,19 +288,27 @@ class CVMCollector:
             print(f"\n=== Baixando dados de {current_year}-{current_month:02d} ===")
 
             if 'informe_diario' in data_types:
-                path = self.download_informe_diario(current_year, current_month)
-                if path:
-                    results.append(('informe_diario', current_year, current_month, path))
+                # Verificar disponibilidade
+                url = self.get_informe_diario_url(current_year, current_month)
+                if check_availability and not self.check_file_exists(url):
+                    print(f"⚠️  Arquivo não disponível: inf_diario_fi_{current_year}{current_month:02d}.zip")
+                else:
+                    path = self.download_informe_diario(current_year, current_month)
+                    if path:
+                        results.append(('informe_diario', current_year, current_month, path))
 
             if 'cda' in data_types:
-                path = self.download_cda(current_year, current_month)
-                if path:
-                    results.append(('cda', current_year, current_month, path))
-
-            if 'cadastro' in data_types:
-                path = self.download_cadastro(current_year, current_month)
-                if path:
-                    results.append(('cadastro', current_year, current_month, path))
+                # CDA só disponível a partir de 2023-01
+                if current_year >= 2023:
+                    url = self.get_cda_url(current_year, current_month)
+                    if check_availability and not self.check_file_exists(url):
+                        print(f"⚠️  Arquivo não disponível: cda_fi_{current_year}{current_month:02d}.zip")
+                    else:
+                        path = self.download_cda(current_year, current_month)
+                        if path:
+                            results.append(('cda', current_year, current_month, path))
+                else:
+                    print(f"⚠️  CDA não disponível antes de 2023 (atual: {current_year}-{current_month:02d})")
 
             current_month += 1
             if current_month > 12:
