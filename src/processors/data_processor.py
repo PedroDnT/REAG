@@ -10,6 +10,70 @@ class DataProcessor:
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
 
+    @staticmethod
+    def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """Padroniza nomes de colunas removendo espaços e BOM."""
+        df = df.copy()
+        df.columns = (
+            df.columns.astype(str)
+            .str.replace('\ufeff', '', regex=False)
+            .str.replace('ï»¿', '', regex=False)
+            .str.replace('\xa0', '', regex=False)
+            .str.strip()
+            .str.upper()
+        )
+        return df
+
+    @staticmethod
+    def _apply_column_aliases(df: pd.DataFrame) -> pd.DataFrame:
+        """Aplica aliases conhecidos para nomes de colunas padrão."""
+        df = df.copy()
+        aliases = {
+            'CNPJ_FUNDO': ['CNPJ_FUNDO_CLASSE'],
+            'DT_COMPTC': ['DT_COMPTC_CLASSE'],
+        }
+
+        for target, alternatives in aliases.items():
+            if target in df.columns:
+                continue
+            for alt in alternatives:
+                if alt in df.columns:
+                    df[target] = df[alt]
+                    break
+
+        return df
+
+    @staticmethod
+    def _coerce_numeric(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+        """Converte colunas numéricas tratando separadores brasileiros."""
+        df = df.copy()
+        for col in columns:
+            if col not in df.columns:
+                continue
+            series = df[col]
+            if series.dtype == object:
+                cleaned = series.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                df[col] = pd.to_numeric(cleaned, errors='coerce')
+            else:
+                df[col] = pd.to_numeric(series, errors='coerce')
+        return df
+
+    @staticmethod
+    def _normalize_cnpj_series(series: pd.Series) -> pd.Series:
+        """Normaliza CNPJ removendo pontuação e preservando NAs."""
+        cleaned = series.astype('string').str.replace(r'\D', '', regex=True)
+        cleaned = cleaned.where(cleaned.str.len() > 0)
+        return cleaned.str.zfill(14)
+
+    @classmethod
+    def _normalize_cnpj_list(cls, cnpj_list: List[str]) -> List[str]:
+        """Normaliza lista de CNPJs para comparação consistente."""
+        if not cnpj_list:
+            return []
+        series = pd.Series(cnpj_list, dtype='string')
+        normalized = cls._normalize_cnpj_series(series).dropna()
+        return normalized.tolist()
+
     def read_informe_diario(self, file_path: Path,
                            encoding: str = 'latin1',
                            sep: str = ';') -> pd.DataFrame:
@@ -18,17 +82,19 @@ class DataProcessor:
             df = pd.read_csv(file_path, encoding=encoding, sep=sep)
 
             # Padronizar nomes de colunas
-            df.columns = df.columns.str.strip().str.upper()
+            df = self._normalize_columns(df)
+            df = self._apply_column_aliases(df)
 
             # Converter data
             if 'DT_COMPTC' in df.columns:
                 df['DT_COMPTC'] = pd.to_datetime(df['DT_COMPTC'], format='%Y-%m-%d', errors='coerce')
 
+            if 'CNPJ_FUNDO' in df.columns:
+                df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
+
             # Converter valores numéricos
             numeric_cols = ['VL_TOTAL', 'VL_QUOTA', 'VL_PATRIM_LIQ', 'CAPTC_DIA', 'RESG_DIA', 'NR_COTST']
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            df = self._coerce_numeric(df, numeric_cols)
 
             return df
         except Exception as e:
@@ -43,17 +109,19 @@ class DataProcessor:
             df = pd.read_csv(file_path, encoding=encoding, sep=sep)
 
             # Padronizar nomes de colunas
-            df.columns = df.columns.str.strip().str.upper()
+            df = self._normalize_columns(df)
+            df = self._apply_column_aliases(df)
 
             # Converter data
             if 'DT_COMPTC' in df.columns:
                 df['DT_COMPTC'] = pd.to_datetime(df['DT_COMPTC'], format='%Y-%m-%d', errors='coerce')
 
+            if 'CNPJ_FUNDO' in df.columns:
+                df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
+
             # Converter valores numéricos
             numeric_cols = ['VL_MERC_POS_FINAL', 'QT_POS_FINAL', 'VL_CUSTO_POS_FINAL']
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            df = self._coerce_numeric(df, numeric_cols)
 
             return df
         except Exception as e:
@@ -68,7 +136,12 @@ class DataProcessor:
             df = pd.read_csv(file_path, encoding=encoding, sep=sep)
 
             # Padronizar nomes de colunas
-            df.columns = df.columns.str.strip().str.upper()
+            df = self._normalize_columns(df)
+            df = self._apply_column_aliases(df)
+
+            for col in ['CNPJ_FUNDO', 'CNPJ_ADMIN', 'CNPJ_GESTOR']:
+                if col in df.columns:
+                    df[col] = self._normalize_cnpj_series(df[col])
 
             # Converter data
             date_cols = ['DT_REG', 'DT_CONST', 'DT_CANCEL', 'DT_INI_SIT', 'DT_INI_ATIV', 'DT_INI_EXERC', 'DT_FIM_EXERC']
@@ -83,30 +156,47 @@ class DataProcessor:
 
     def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por lista de CNPJs"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if 'CNPJ_FUNDO' not in df.columns:
             return pd.DataFrame()
 
-        return df[df['CNPJ_FUNDO'].isin(cnpj_list)].copy()
+        df = df.copy()
+        df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
+        normalized_list = self._normalize_cnpj_list(cnpj_list)
+        return df[df['CNPJ_FUNDO'].isin(normalized_list)].copy()
 
     def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do administrador"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if 'CNPJ_ADMIN' not in df.columns:
             return pd.DataFrame()
 
-        return df[df['CNPJ_ADMIN'].isin(admin_cnpj_list)].copy()
+        df = df.copy()
+        df['CNPJ_ADMIN'] = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
+        normalized_list = self._normalize_cnpj_list(admin_cnpj_list)
+        return df[df['CNPJ_ADMIN'].isin(normalized_list)].copy()
 
     def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do gestor"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if 'CNPJ_GESTOR' not in df.columns:
             return pd.DataFrame()
 
-        return df[df['CNPJ_GESTOR'].isin(gestor_cnpj_list)].copy()
+        df = df.copy()
+        df['CNPJ_GESTOR'] = self._normalize_cnpj_series(df['CNPJ_GESTOR'])
+        normalized_list = self._normalize_cnpj_list(gestor_cnpj_list)
+        return df[df['CNPJ_GESTOR'].isin(normalized_list)].copy()
 
     def filter_by_date_range(self, df: pd.DataFrame,
                             start_date: str,
                             end_date: str,
                             date_col: str = 'DT_COMPTC') -> pd.DataFrame:
         """Filtra DataFrame por intervalo de datas"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if date_col not in df.columns:
             return pd.DataFrame()
 
