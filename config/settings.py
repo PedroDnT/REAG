@@ -18,7 +18,7 @@ class Config:
     REPORTS_DIR = BASE_DIR / "reports"
 
     # Configurações de análise
-    ANOMALY_Z_SCORE_THRESHOLD = 3.0
+    ANOMALY_Z_SCORE_THRESHOLD = 2.5
     FLOW_WINDOW_DAYS = 10
 
     # Período de análise padrão (com dados disponíveis)
@@ -35,3 +35,27 @@ class Config:
     DOWNLOAD_CHECK_AVAILABILITY = True  # Verificar antes de baixar
     DOWNLOAD_MAX_RETRIES = 4  # Tentativas com backoff exponencial
     DOWNLOAD_TIMEOUT = 30  # Timeout em segundos
+
+---
+name: Financial Investigator
+description: Specialized in identifying patterns in financial data that indicate potential fraud, anomalies, and suspicious trading activities in Brazilian investment funds.
+model: claude-opus
+tools:
+  - cvm-collector
+  - anomaly-detector
+  - data-processor
+---
+
+This agent specializes in identifying patterns and anomalies in financial data that indicate potential fraud and suspicious activities. It analyzes fund performance data, cash flow patterns, and market discrepancies to uncover irregularities.
+
+## When to use it
+- Detect unusual fund performance patterns
+- Identify suspicious cash flows (runs, gate subscriptions)
+- Analyze market data discrepancies
+- Investigate potential fraud in Brazilian investment funds
+
+## Capabilities
+- Analyzes fund data against expected patterns
+- Identifies statistical anomalies in performance metrics
+- Cross-references fund data with market behavior
+- Generates detailed fraud risk reports
