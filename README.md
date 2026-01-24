@@ -131,6 +131,21 @@ REAG/
 - **Método**: Correlação negativa entre Z-scores
 - **Detecta**: Entradas em dias de performance ruim (ou vice-versa)
 
+### 5. 🆕 Benford's Law Analysis
+
+- **Método**: Análise de distribuição de primeiro dígito
+- **Threshold**: MAD > 0.015 ou p-value < 0.05
+- **Detecta**: Números fabricados/manipulados
+- **Sucesso**: Usado em casos Enron, Madoff
+- **Guia completo**: Ver `BENFORD_LAW_USAGE_GUIDE.md`
+
+### 6. 🆕 Benchmark de Métodos
+
+Para comparação detalhada de todos os métodos de detecção:
+- **Documento**: `FRAUD_INVESTIGATION_BENCHMARK.md`
+- **Compara**: Precisão, Recall, Velocidade de cada método
+- **Recomenda**: Métodos adicionais (ML, Network Analysis)
+
 ## 📈 Outputs
 
 ### Dados Processados
