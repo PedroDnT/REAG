@@ -173,7 +173,6 @@ class DataProcessor:
         if 'CNPJ_ADMIN' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
         df['CNPJ_ADMIN'] = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
         normalized_list = self._normalize_cnpj_list(admin_cnpj_list)
         return df[df['CNPJ_ADMIN'].isin(normalized_list)].copy()
