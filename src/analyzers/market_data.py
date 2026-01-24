@@ -41,9 +41,11 @@ class MarketDataValidator:
         if cache_file.exists():
             try:
                 df = pd.read_csv(cache_file, parse_dates=['date'])
-                for _, row in df.iterrows():
-                    key = (row['ticker'], row['date'].date())
-                    self.price_cache[key] = row['price']
+                # Vectorized conversion: convert date column to date objects and create dict
+                df['date'] = pd.to_datetime(df['date']).dt.date
+                # Use vectorized set_index + to_dict for much faster dictionary creation
+                self.price_cache = {(ticker, date): price 
+                                   for ticker, date, price in zip(df['ticker'], df['date'], df['price'])}
                 print(f"📂 Cache carregado: {len(self.price_cache):,} preços")
             except Exception as e:
                 print(f"⚠️  Erro ao carregar cache: {e}")
@@ -151,23 +153,23 @@ class MarketDataValidator:
         if missing:
             raise ValueError(f"Colunas faltando: {missing}")
 
-        # Preparar dados
-        cda_analysis = cda_df.copy()
+        # Sample first to reduce memory and processing (if needed)
+        if sample_size and len(cda_df) > sample_size:
+            print(f"📊 Amostrando {sample_size} de {len(cda_df):,} registros")
+            cda_analysis = cda_df.sample(n=sample_size, random_state=42).copy()
+        else:
+            cda_analysis = cda_df.copy()
 
         # Converter data se necessário
         if not pd.api.types.is_datetime64_any_dtype(cda_analysis['DT_COMPTC']):
             cda_analysis['DT_COMPTC'] = pd.to_datetime(cda_analysis['DT_COMPTC'])
 
-        # Calcular preço declarado por unidade
-        cda_analysis['DECLARED_PRICE'] = cda_analysis.apply(
-            lambda row: row['VL_MERCADO'] / row['QT_POS'] if row['QT_POS'] > 0 else 0,
-            axis=1
+        # Calcular preço declarado por unidade (vectorized - much faster than apply with lambda)
+        cda_analysis['DECLARED_PRICE'] = np.where(
+            cda_analysis['QT_POS'] > 0,
+            cda_analysis['VL_MERCADO'] / cda_analysis['QT_POS'],
+            0
         )
-
-        # Sample se necessário
-        if sample_size and len(cda_analysis) > sample_size:
-            print(f"📊 Amostrando {sample_size} de {len(cda_analysis):,} registros")
-            cda_analysis = cda_analysis.sample(n=sample_size, random_state=42)
 
         # Buscar preços de mercado
         validations = []
@@ -175,10 +177,11 @@ class MarketDataValidator:
 
         print(f"🌐 Buscando preços para {total:,} posições...")
 
-        for idx, (i, row) in enumerate(cda_analysis.iterrows(), 1):
-            ticker = row['CD_ATIVO']
-            date = row['DT_COMPTC'].date()
-            declared_price = row['DECLARED_PRICE']
+        # Use itertuples instead of iterrows - much faster (10-100x)
+        for idx, row in enumerate(cda_analysis.itertuples(), 1):
+            ticker = row.CD_ATIVO
+            date = row.DT_COMPTC.date()
+            declared_price = row.DECLARED_PRICE
 
             # Progress
             if idx % 100 == 0:
@@ -192,14 +195,14 @@ class MarketDataValidator:
                 divergence_pct = ((declared_price - market_price) / market_price * 100)
 
                 validations.append({
-                    'CNPJ_FUNDO': row.get('CNPJ_FUNDO'),
+                    'CNPJ_FUNDO': getattr(row, 'CNPJ_FUNDO', None),
                     'CD_ATIVO': ticker,
                     'DT_COMPTC': date,
                     'DECLARED_PRICE': declared_price,
                     'MARKET_PRICE': market_price,
                     'DIVERGENCE_PCT': divergence_pct,
                     'DIVERGENCE_ABS': declared_price - market_price,
-                    'POSITION_VALUE': row['VL_MERCADO'],
+                    'POSITION_VALUE': row.VL_MERCADO,
                     'has_market_price': True
                 })
 
@@ -208,14 +211,14 @@ class MarketDataValidator:
                     time.sleep(0.5)
             else:
                 validations.append({
-                    'CNPJ_FUNDO': row.get('CNPJ_FUNDO'),
+                    'CNPJ_FUNDO': getattr(row, 'CNPJ_FUNDO', None),
                     'CD_ATIVO': ticker,
                     'DT_COMPTC': date,
                     'DECLARED_PRICE': declared_price,
                     'MARKET_PRICE': None,
                     'DIVERGENCE_PCT': None,
                     'DIVERGENCE_ABS': None,
-                    'POSITION_VALUE': row['VL_MERCADO'],
+                    'POSITION_VALUE': row.VL_MERCADO,
                     'has_market_price': False
                 })
 
