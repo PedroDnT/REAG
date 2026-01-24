@@ -14,8 +14,6 @@ class CVMCollector:
 
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
-        self.session = requests.Session()
-        self._availability_cache: dict[str, bool] = {}
         self._ensure_directories()
 
     def _ensure_directories(self):
@@ -23,35 +21,21 @@ class CVMCollector:
         self.config.RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.config.PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    def check_file_exists(self, url: str, cache: Optional[dict[str, bool]] = None) -> bool:
+    def check_file_exists(self, url: str) -> bool:
         """
         Verifica se arquivo existe na CVM usando HEAD request
 
         Args:
             url: URL do arquivo a verificar
-            cache: Cache opcional para memoizar checagens por URL
 
         Returns:
             True se arquivo existe (HTTP 200), False caso contrário
         """
-        if cache is None:
-            cache = self._availability_cache
-
-        if url in cache:
-            return cache[url]
-
         try:
-            response = self.session.head(
-                url,
-                timeout=self.config.DOWNLOAD_TIMEOUT,
-                allow_redirects=True,
-            )
-            exists = response.status_code == 200
-            cache[url] = exists
-            return exists
+            response = requests.head(url, timeout=10, allow_redirects=True)
+            return response.status_code == 200
         except Exception as e:
             print(f"Erro ao verificar {url}: {e}")
-            cache[url] = False
             return False
 
     def get_available_months(self, data_type: str = 'informe_diario',
@@ -70,7 +54,6 @@ class CVMCollector:
         """
         available = []
         current_date = datetime.now()
-        availability_cache: dict[str, bool] = {}
 
         for year in range(start_year, end_year + 1):
             for month in range(1, 13):
@@ -85,7 +68,7 @@ class CVMCollector:
                 else:
                     continue
 
-                if self.check_file_exists(url, cache=availability_cache):
+                if self.check_file_exists(url):
                     available.append((year, month))
 
         return available
@@ -102,33 +85,21 @@ class CVMCollector:
         """Retorna URL do Cadastro para ano/mês específico"""
         return f"{self.config.CVM_CADASTRO_URL}/cad_fi_{year}{month:02d}.csv"
 
-    def download_file(
-        self,
-        url: str,
-        output_path: Path,
-        max_retries: Optional[int] = None,
-        timeout: Optional[int] = None,
-    ) -> bool:
+    def download_file(self, url: str, output_path: Path, max_retries: int = 4) -> bool:
         """
         Baixa arquivo da URL e salva localmente com retry logic
 
         Args:
             url: URL do arquivo
             output_path: Caminho de saída
-            max_retries: Número máximo de tentativas (Config.DOWNLOAD_MAX_RETRIES)
-            timeout: Timeout em segundos (Config.DOWNLOAD_TIMEOUT)
+            max_retries: Número máximo de tentativas (padrão: 4)
 
         Returns:
             True se sucesso, False caso contrário
         """
-        if max_retries is None:
-            max_retries = self.config.DOWNLOAD_MAX_RETRIES
-        if timeout is None:
-            timeout = self.config.DOWNLOAD_TIMEOUT
-
         for attempt in range(max_retries):
             try:
-                response = self.session.get(url, stream=True, timeout=timeout)
+                response = requests.get(url, stream=True, timeout=30)
                 response.raise_for_status()
 
                 total_size = int(response.headers.get('content-length', 0))
