@@ -160,10 +160,9 @@ class DataProcessor:
         if 'CNPJ_FUNDO' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
         normalized_list = self._normalize_cnpj_list(cnpj_list)
-        return df[df['CNPJ_FUNDO'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do administrador"""
@@ -172,10 +171,9 @@ class DataProcessor:
         if 'CNPJ_ADMIN' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_ADMIN'] = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
         normalized_list = self._normalize_cnpj_list(admin_cnpj_list)
-        return df[df['CNPJ_ADMIN'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do gestor"""
@@ -184,10 +182,9 @@ class DataProcessor:
         if 'CNPJ_GESTOR' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_GESTOR'] = self._normalize_cnpj_series(df['CNPJ_GESTOR'])
         normalized_list = self._normalize_cnpj_list(gestor_cnpj_list)
-        return df[df['CNPJ_GESTOR'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_GESTOR'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_date_range(self, df: pd.DataFrame,
                             start_date: str,
