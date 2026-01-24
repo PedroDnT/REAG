@@ -28,6 +28,9 @@ class BenfordLawAnalyzer:
     Non-compliance suggests possible data manipulation or fabrication.
     """
     
+    # Minimum risk score threshold for including funds in results
+    MIN_RISK_SCORE_THRESHOLD = 1.5  # Corresponds to MEDIUM risk level
+    
     # Expected Benford's Law distribution for first digits
     BENFORD_EXPECTED = {
         1: 0.301,  # 30.1%
@@ -64,17 +67,37 @@ class BenfordLawAnalyzer:
         if len(values) == 0:
             return pd.Series(dtype=int)
         
-        # Convert to strings and extract first non-zero digit
-        values_str = values.astype(str)
-        
+        # Use mathematical approach to handle scientific notation correctly
         first_digits = []
-        for val_str in values_str:
-            # Remove decimal point and find first non-zero digit
-            digits_only = val_str.replace('.', '').replace('-', '')
-            for char in digits_only:
-                if char.isdigit() and char != '0':
-                    first_digits.append(int(char))
-                    break
+        for val in values:
+            try:
+                # Convert to float to handle large integers
+                val_float = float(val)
+                
+                # Ensure we have a positive finite number
+                if val_float <= 0 or not np.isfinite(val_float):
+                    continue
+                
+                # Get the first digit by normalizing to [1, 10)
+                # Find power of 10: 10^n <= val < 10^(n+1)
+                if val_float >= 1:
+                    # For values >= 1, divide by powers of 10 until in [1, 10)
+                    normalized = val_float
+                    while normalized >= 10:
+                        normalized /= 10
+                else:
+                    # For values < 1, multiply by powers of 10 until in [1, 10)
+                    normalized = val_float
+                    while normalized < 1:
+                        normalized *= 10
+                
+                # First digit is the integer part of the normalized value
+                first_digit = int(normalized)
+                if 1 <= first_digit <= 9:
+                    first_digits.append(first_digit)
+            except (ValueError, TypeError, OverflowError):
+                # Skip values that can't be converted
+                continue
         
         return pd.Series(first_digits)
     
@@ -125,8 +148,9 @@ class BenfordLawAnalyzer:
             expected_count = expected * sample_size
             observed_count = obs * sample_size
             
-            if expected_count > 0:
-                chi_square += ((observed_count - expected_count) ** 2) / expected_count
+            # Calculate chi-square component
+            # Note: expected_count is always > 0 for Benford distribution
+            chi_square += ((observed_count - expected_count) ** 2) / expected_count
         
         # Degrees of freedom = 9 digits - 1
         df = 8
@@ -329,7 +353,7 @@ class BenfordLawAnalyzer:
                 fund_results['overall_fraud_risk'] = 'LOW'
             
             # Only include funds with at least MEDIUM risk
-            if avg_risk_score >= 1.5:
+            if avg_risk_score >= self.MIN_RISK_SCORE_THRESHOLD:
                 results.append(fund_results)
         
         result_df = pd.DataFrame(results)
