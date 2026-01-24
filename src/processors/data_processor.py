@@ -43,6 +43,9 @@ class DataProcessor:
 
         return df
 
+    # Translation table for Brazilian number format (created once, reused)
+    _BRAZILIAN_NUMBER_TRANS = str.maketrans({'.': '', ',': '.'})
+    
     @staticmethod
     def _coerce_numeric(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
         """Converte colunas numéricas tratando separadores brasileiros."""
@@ -52,7 +55,8 @@ class DataProcessor:
                 continue
             series = df[col]
             if series.dtype == object:
-                cleaned = series.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                # Use str.translate for faster simultaneous replacements
+                cleaned = series.astype(str).str.translate(DataProcessor._BRAZILIAN_NUMBER_TRANS)
                 df[col] = pd.to_numeric(cleaned, errors='coerce')
             else:
                 df[col] = pd.to_numeric(series, errors='coerce')
@@ -153,10 +157,18 @@ class DataProcessor:
             print(f"Erro ao ler Cadastro {file_path}: {e}")
             return pd.DataFrame()
 
-    def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
-        """Filtra DataFrame por lista de CNPJs"""
+    def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Prepares DataFrame by normalizing columns and applying aliases.
+        This is a helper to avoid duplicate normalization in filter methods.
+        """
         df = self._normalize_columns(df)
         df = self._apply_column_aliases(df)
+        return df
+
+    def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+        """Filtra DataFrame por lista de CNPJs"""
+        df = self._prepare_dataframe(df)
         if 'CNPJ_FUNDO' not in df.columns:
             return pd.DataFrame()
 
@@ -166,8 +178,7 @@ class DataProcessor:
 
     def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do administrador"""
-        df = self._normalize_columns(df)
-        df = self._apply_column_aliases(df)
+        df = self._prepare_dataframe(df)
         if 'CNPJ_ADMIN' not in df.columns:
             return pd.DataFrame()
 
@@ -177,8 +188,7 @@ class DataProcessor:
 
     def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do gestor"""
-        df = self._normalize_columns(df)
-        df = self._apply_column_aliases(df)
+        df = self._prepare_dataframe(df)
         if 'CNPJ_GESTOR' not in df.columns:
             return pd.DataFrame()
 
@@ -191,8 +201,7 @@ class DataProcessor:
                             end_date: str,
                             date_col: str = 'DT_COMPTC') -> pd.DataFrame:
         """Filtra DataFrame por intervalo de datas"""
-        df = self._normalize_columns(df)
-        df = self._apply_column_aliases(df)
+        df = self._prepare_dataframe(df)
         if date_col not in df.columns:
             return pd.DataFrame()
 

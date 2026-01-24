@@ -128,38 +128,44 @@ class FraudSchemeDetector:
         # Mapear administrador de cada fundo
         fund_to_admin = cadastro_df.set_index('CNPJ_FUNDO')['CNPJ_ADMIN'].to_dict()
 
-        for idx, row in fund_holdings.iterrows():
-            holder_fund = row['CNPJ_FUNDO']
-            held_fund = row['CD_ATIVO']
+        # Vectorized approach: add admin columns to fund_holdings
+        fund_holdings['holder_admin'] = fund_holdings['CNPJ_FUNDO'].map(fund_to_admin)
+        fund_holdings['held_admin'] = fund_holdings['CD_ATIVO'].map(fund_to_admin)
+        
+        # Filter to same admin only (much faster than checking in loop)
+        same_admin = fund_holdings[
+            (fund_holdings['holder_admin'].notna()) & 
+            (fund_holdings['held_admin'].notna()) &
+            (fund_holdings['holder_admin'] == fund_holdings['held_admin'])
+        ]
+        
+        # Use itertuples for remaining processing (10-100x faster than iterrows)
+        for row in same_admin.itertuples():
+            holder_fund = row.CNPJ_FUNDO
+            held_fund = row.CD_ATIVO
+            holder_admin = row.holder_admin
 
-            # Verificar se são do mesmo administrador
-            holder_admin = fund_to_admin.get(holder_fund)
-            held_admin = fund_to_admin.get(held_fund)
+            # Verificar retornos recentes
+            holder_returns = informe_df[informe_df['CNPJ_FUNDO'] == holder_fund]
+            held_returns = informe_df[informe_df['CNPJ_FUNDO'] == held_fund]
 
-            if holder_admin and held_admin and holder_admin == held_admin:
-                # Mesmo administrador! Red flag
+            if not holder_returns.empty and not held_returns.empty:
+                holder_avg_return = holder_returns['VL_QUOTA'].pct_change().mean() * 100
+                held_avg_return = held_returns['VL_QUOTA'].pct_change().mean() * 100
 
-                # Verificar retornos recentes
-                holder_returns = informe_df[informe_df['CNPJ_FUNDO'] == holder_fund]
-                held_returns = informe_df[informe_df['CNPJ_FUNDO'] == held_fund]
-
-                if not holder_returns.empty and not held_returns.empty:
-                    holder_avg_return = holder_returns['VL_QUOTA'].pct_change().mean() * 100
-                    held_avg_return = held_returns['VL_QUOTA'].pct_change().mean() * 100
-
-                    # Red flag se retornos muito altos
-                    if holder_avg_return > 1 or held_avg_return > 1:  # > 1% ao dia
-                        layered_structures.append({
-                            'admin_cnpj': holder_admin,
-                            'holder_fund': holder_fund,
-                            'held_fund': held_fund,
-                            'investment_value': row['VL_MERCADO'],
-                            'holder_avg_daily_return': holder_avg_return,
-                            'held_avg_daily_return': held_avg_return,
-                            'fraud_pattern': 'LAYERED_FUND_STRUCTURE',
-                            'severity': 'HIGH' if holder_avg_return > 2 else 'MEDIUM',
-                            'banco_master_similarity': 'MEDIUM'
-                        })
+                # Red flag se retornos muito altos
+                if holder_avg_return > 1 or held_avg_return > 1:  # > 1% ao dia
+                    layered_structures.append({
+                        'admin_cnpj': holder_admin,
+                        'holder_fund': holder_fund,
+                        'held_fund': held_fund,
+                        'investment_value': row.VL_MERCADO,
+                        'holder_avg_daily_return': holder_avg_return,
+                        'held_avg_daily_return': held_avg_return,
+                        'fraud_pattern': 'LAYERED_FUND_STRUCTURE',
+                        'severity': 'HIGH' if holder_avg_return > 2 else 'MEDIUM',
+                        'banco_master_similarity': 'MEDIUM'
+                    })
 
         result_df = pd.DataFrame(layered_structures)
 
@@ -200,11 +206,10 @@ class FraudSchemeDetector:
 
             total_value = portfolio['VL_MERCADO'].sum()
 
-            # Calcular % em ativos ilíquidos
+            # Calcular % em ativos ilíquidos using vectorized regex (much faster than lambda)
             illiquid_types = ['CRI', 'CRA', 'DEBENTURE', 'CDB']
-            illiquid_mask = portfolio['CD_ATIVO'].apply(
-                lambda x: any(t in str(x).upper() for t in illiquid_types)
-            )
+            illiquid_pattern = '|'.join(illiquid_types)
+            illiquid_mask = portfolio['CD_ATIVO'].str.contains(illiquid_pattern, case=False, na=False, regex=True)
             illiquid_value = portfolio[illiquid_mask]['VL_MERCADO'].sum()
             illiquid_pct = (illiquid_value / total_value * 100) if total_value > 0 else 0
 

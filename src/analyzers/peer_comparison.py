@@ -50,12 +50,15 @@ class PeerComparisonAnalyzer:
             'Fundo de Investimento Imobiliário': 'REAL_ESTATE'
         }
 
-        for idx, row in cadastro_df.iterrows():
-            cnpj = row.get('CNPJ_FUNDO')
-            classe = row.get('CLASSE', 'UNKNOWN')
-
-            category = class_mapping.get(classe, 'OTHER')
-            self.fund_categories[cnpj] = category
+        # Vectorized mapping - much faster than iterrows
+        # Handle missing CLASSE column properly
+        if 'CLASSE' in cadastro_df.columns:
+            mapped_categories = cadastro_df['CLASSE'].fillna('UNKNOWN').map(class_mapping).fillna('OTHER')
+        else:
+            # If CLASSE doesn't exist, map all to 'OTHER' with proper index alignment
+            mapped_categories = pd.Series('OTHER', index=cadastro_df.index)
+        
+        self.fund_categories = dict(zip(cadastro_df['CNPJ_FUNDO'], mapped_categories))
 
         print(f"✅ {len(self.fund_categories):,} fundos categorizados")
 
