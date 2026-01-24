@@ -55,8 +55,8 @@ class PeerComparisonAnalyzer:
         if 'CLASSE' in cadastro_df.columns:
             mapped_categories = cadastro_df['CLASSE'].fillna('UNKNOWN').map(class_mapping).fillna('OTHER')
         else:
-            # If CLASSE doesn't exist, map all to 'OTHER'
-            mapped_categories = pd.Series(['OTHER'] * len(cadastro_df), index=cadastro_df.index)
+            # If CLASSE doesn't exist, map all to 'OTHER' with proper index alignment
+            mapped_categories = pd.Series('OTHER', index=cadastro_df.index)
         
         self.fund_categories = dict(zip(cadastro_df['CNPJ_FUNDO'], mapped_categories))
 

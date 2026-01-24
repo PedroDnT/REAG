@@ -225,22 +225,24 @@ class PhantomAssetDetector:
         print(f"📊 Analisando {len(unique_assets):,} ativos únicos...")
 
         # Pre-group by asset code to avoid repeated scans (much faster)
-        # Build aggregation dict based on available columns
+        # Build aggregation dict based on available columns (using named aggregations
+        # to keep a flat column index and avoid MultiIndex column names)
         agg_dict = {}
         has_vl_mercado = 'VL_MERCADO' in cda_df.columns
         has_cnpj_fundo = 'CNPJ_FUNDO' in cda_df.columns
         has_dt_comptc = 'DT_COMPTC' in cda_df.columns
         
         if has_vl_mercado:
-            agg_dict['VL_MERCADO'] = 'sum'
+            agg_dict['total_value'] = ('VL_MERCADO', 'sum')
         if has_cnpj_fundo:
-            agg_dict['CNPJ_FUNDO'] = 'nunique'
+            agg_dict['num_funds'] = ('CNPJ_FUNDO', 'nunique')
         if has_dt_comptc:
-            agg_dict['DT_COMPTC'] = ['min', 'max']
+            agg_dict['first_seen'] = ('DT_COMPTC', 'min')
+            agg_dict['last_seen'] = ('DT_COMPTC', 'max')
         
         # Only group if we have columns to aggregate
         if agg_dict:
-            asset_groups = cda_df.groupby('CD_ATIVO').agg(agg_dict)
+            asset_groups = cda_df.groupby('CD_ATIVO').agg(**agg_dict)
         else:
             asset_groups = pd.DataFrame()
 
@@ -251,14 +253,10 @@ class PhantomAssetDetector:
                 # Use pre-grouped data instead of scanning entire DataFrame
                 if not asset_groups.empty and asset_code in asset_groups.index:
                     asset_info = asset_groups.loc[asset_code]
-                    total_value = asset_info['VL_MERCADO'] if has_vl_mercado else 0
-                    num_funds = asset_info['CNPJ_FUNDO'] if has_cnpj_fundo else 0
-                    if has_dt_comptc:
-                        first_seen = asset_info[('DT_COMPTC', 'min')]
-                        last_seen = asset_info[('DT_COMPTC', 'max')]
-                    else:
-                        first_seen = None
-                        last_seen = None
+                    total_value = asset_info['total_value'] if has_vl_mercado else 0
+                    num_funds = asset_info['num_funds'] if has_cnpj_fundo else 0
+                    first_seen = asset_info['first_seen'] if has_dt_comptc else None
+                    last_seen = asset_info['last_seen'] if has_dt_comptc else None
                 else:
                     total_value = 0
                     num_funds = 0

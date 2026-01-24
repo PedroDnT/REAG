@@ -43,6 +43,9 @@ class DataProcessor:
 
         return df
 
+    # Translation table for Brazilian number format (created once, reused)
+    _BRAZILIAN_NUMBER_TRANS = str.maketrans({'.': '', ',': '.'})
+    
     @staticmethod
     def _coerce_numeric(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
         """Converte colunas numéricas tratando separadores brasileiros."""
@@ -53,8 +56,7 @@ class DataProcessor:
             series = df[col]
             if series.dtype == object:
                 # Use str.translate for faster simultaneous replacements
-                trans_table = str.maketrans({'.': '', ',': '.'})
-                cleaned = series.astype(str).str.translate(trans_table)
+                cleaned = series.astype(str).str.translate(DataProcessor._BRAZILIAN_NUMBER_TRANS)
                 df[col] = pd.to_numeric(cleaned, errors='coerce')
             else:
                 df[col] = pd.to_numeric(series, errors='coerce')
