@@ -73,7 +73,6 @@ class DataProcessor:
         series = pd.Series(cnpj_list, dtype='string')
         normalized = cls._normalize_cnpj_series(series).dropna()
         return normalized.tolist()
-
     def read_informe_diario(self, file_path: Path,
                            encoding: str = 'latin1',
                            sep: str = ';') -> pd.DataFrame:
@@ -161,36 +160,39 @@ class DataProcessor:
         if 'CNPJ_FUNDO' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
         normalized_list = self._normalize_cnpj_list(cnpj_list)
-        return df[df['CNPJ_FUNDO'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do administrador"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if 'CNPJ_ADMIN' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_ADMIN'] = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
         normalized_list = self._normalize_cnpj_list(admin_cnpj_list)
-        return df[df['CNPJ_ADMIN'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do gestor"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if 'CNPJ_GESTOR' not in df.columns:
             return pd.DataFrame()
 
-        df = df.copy()
-        df['CNPJ_GESTOR'] = self._normalize_cnpj_series(df['CNPJ_GESTOR'])
         normalized_list = self._normalize_cnpj_list(gestor_cnpj_list)
-        return df[df['CNPJ_GESTOR'].isin(normalized_list)].copy()
+        normalized_series = self._normalize_cnpj_series(df['CNPJ_GESTOR'])
+        return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_date_range(self, df: pd.DataFrame,
                             start_date: str,
                             end_date: str,
                             date_col: str = 'DT_COMPTC') -> pd.DataFrame:
         """Filtra DataFrame por intervalo de datas"""
+        df = self._normalize_columns(df)
+        df = self._apply_column_aliases(df)
         if date_col not in df.columns:
             return pd.DataFrame()
 
