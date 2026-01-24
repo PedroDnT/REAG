@@ -115,7 +115,8 @@ class PhantomAssetDetector:
         """
         print(f"📥 Carregando fundos do cadastro...")
 
-        df = pd.read_csv(cadastro_path, encoding='latin1', sep=';')
+        # Only read the required column for better performance
+        df = pd.read_csv(cadastro_path, encoding='latin1', sep=';', usecols=['CNPJ_FUNDO'])
 
         # Extrair CNPJs de fundos ativos
         if 'CNPJ_FUNDO' in df.columns:
@@ -223,21 +224,38 @@ class PhantomAssetDetector:
         unique_assets = cda_df['CD_ATIVO'].unique()
         print(f"📊 Analisando {len(unique_assets):,} ativos únicos...")
 
+        # Pre-group by asset code to avoid repeated scans (much faster)
+        asset_groups = cda_df.groupby('CD_ATIVO').agg({
+            'VL_MERCADO': 'sum' if 'VL_MERCADO' in cda_df.columns else 'count',
+            'CNPJ_FUNDO': 'nunique' if 'CNPJ_FUNDO' in cda_df.columns else 'count',
+            'DT_COMPTC': ['min', 'max'] if 'DT_COMPTC' in cda_df.columns else 'count'
+        })
+
         for asset_code in unique_assets:
             validation = self.validate_asset(asset_code)
 
             if validation['status'] == 'PHANTOM':
-                # Buscar informações do ativo
-                asset_data = cda_df[cda_df['CD_ATIVO'] == asset_code]
+                # Use pre-grouped data instead of scanning entire DataFrame
+                if asset_code in asset_groups.index:
+                    asset_info = asset_groups.loc[asset_code]
+                    total_value = asset_info['VL_MERCADO'] if 'VL_MERCADO' in cda_df.columns else 0
+                    num_funds = asset_info['CNPJ_FUNDO'] if 'CNPJ_FUNDO' in cda_df.columns else 0
+                    first_seen = asset_info[('DT_COMPTC', 'min')] if 'DT_COMPTC' in cda_df.columns else None
+                    last_seen = asset_info[('DT_COMPTC', 'max')] if 'DT_COMPTC' in cda_df.columns else None
+                else:
+                    total_value = 0
+                    num_funds = 0
+                    first_seen = None
+                    last_seen = None
 
                 phantom_assets.append({
                     'asset_code': asset_code,
                     'asset_type': validation['asset_type'],
                     'expected_registry': validation['registry'],
-                    'total_value': asset_data['VL_MERCADO'].sum() if 'VL_MERCADO' in asset_data.columns else 0,
-                    'num_funds_holding': asset_data['CNPJ_FUNDO'].nunique() if 'CNPJ_FUNDO' in asset_data.columns else 0,
-                    'first_seen': asset_data['DT_COMPTC'].min() if 'DT_COMPTC' in asset_data.columns else None,
-                    'last_seen': asset_data['DT_COMPTC'].max() if 'DT_COMPTC' in asset_data.columns else None,
+                    'total_value': total_value,
+                    'num_funds_holding': num_funds,
+                    'first_seen': first_seen,
+                    'last_seen': last_seen,
                     'fraud_severity': 'CRITICAL'
                 })
 

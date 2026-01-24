@@ -52,7 +52,9 @@ class DataProcessor:
                 continue
             series = df[col]
             if series.dtype == object:
-                cleaned = series.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                # Use str.translate for faster simultaneous replacements
+                trans_table = str.maketrans({'.': '', ',': '.'})
+                cleaned = series.astype(str).str.translate(trans_table)
                 df[col] = pd.to_numeric(cleaned, errors='coerce')
             else:
                 df[col] = pd.to_numeric(series, errors='coerce')
