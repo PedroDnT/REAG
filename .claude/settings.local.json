@@ -15,7 +15,9 @@
       "Bash(gh repo create:*)",
       "Bash(pytest:*)",
       "Bash(python:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Skill(superpowers:brainstorming)",
+      "Skill(superpowers:brainstorming:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
