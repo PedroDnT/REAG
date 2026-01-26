@@ -67,10 +67,18 @@ class DataProcessor:
     @staticmethod
     def _normalize_cnpj_series(series: pd.Series) -> pd.Series:
         """Normaliza CNPJ removendo pontuação e preservando NAs."""
-        cleaned = series.astype('string').str.replace(r'\D', '', regex=True)
-        cleaned = cleaned.where(cleaned.str.len() > 0)
-        return cleaned.str.zfill(14)
+        # Preserve original NA values so they are not transformed by string operations
+        na_mask = series.isna()
 
+        # Work with pandas' nullable string dtype; replace non-NA non-digits,
+        # and treat missing as empty strings during cleaning
+        cleaned = series.astype('string').fillna('').str.replace(r'\D', '', regex=True)
+        cleaned = cleaned.where(cleaned.str.len() > 0)
+        cleaned = cleaned.str.zfill(14)
+
+        # Restore original NA positions explicitly
+        cleaned[na_mask] = pd.NA
+        return cleaned
     @classmethod
     def _normalize_cnpj_list(cls, cnpj_list: List[str]) -> List[str]:
         """Normaliza lista de CNPJs para comparação consistente."""
