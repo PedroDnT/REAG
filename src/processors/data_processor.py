@@ -12,7 +12,10 @@ class DataProcessor:
 
     @staticmethod
     def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-        """Padroniza nomes de colunas removendo espaços e BOM."""
+        """Padroniza nomes de colunas removendo espaços e BOM.
+        
+        Esta operação é idempotente - pode ser chamada múltiplas vezes sem efeito adicional.
+        """
         df = df.copy()
         df.columns = (
             df.columns.astype(str)
@@ -26,7 +29,10 @@ class DataProcessor:
 
     @staticmethod
     def _apply_column_aliases(df: pd.DataFrame) -> pd.DataFrame:
-        """Aplica aliases conhecidos para nomes de colunas padrão."""
+        """Aplica aliases conhecidos para nomes de colunas padrão.
+        
+        Esta operação é idempotente - pode ser chamada múltiplas vezes sem efeito adicional.
+        """
         df = df.copy()
         aliases = {
             'CNPJ_FUNDO': ['CNPJ_FUNDO_CLASSE'],
@@ -154,7 +160,18 @@ class DataProcessor:
             return pd.DataFrame()
 
     def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
-        """Filtra DataFrame por lista de CNPJs"""
+        """Filtra DataFrame por lista de CNPJs.
+        
+        Normaliza colunas e CNPJs automaticamente para garantir correspondências corretas.
+        Operações de normalização são idempotentes e podem ser chamadas múltiplas vezes.
+        
+        Args:
+            df: DataFrame com coluna CNPJ_FUNDO
+            cnpj_list: Lista de CNPJs para filtrar (aceita formatos variados)
+            
+        Returns:
+            DataFrame filtrado contendo apenas linhas com CNPJs correspondentes
+        """
         df = self._normalize_columns(df)
         df = self._apply_column_aliases(df)
         if 'CNPJ_FUNDO' not in df.columns:
@@ -165,7 +182,18 @@ class DataProcessor:
         return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
-        """Filtra DataFrame por CNPJ do administrador"""
+        """Filtra DataFrame por CNPJ do administrador.
+        
+        Normaliza colunas e CNPJs automaticamente para garantir correspondências corretas.
+        Operações de normalização são idempotentes e podem ser chamadas múltiplas vezes.
+        
+        Args:
+            df: DataFrame com coluna CNPJ_ADMIN
+            admin_cnpj_list: Lista de CNPJs de administradores (aceita formatos variados)
+            
+        Returns:
+            DataFrame filtrado contendo apenas fundos dos administradores especificados
+        """
         df = self._normalize_columns(df)
         df = self._apply_column_aliases(df)
         if 'CNPJ_ADMIN' not in df.columns:
@@ -176,7 +204,18 @@ class DataProcessor:
         return df[normalized_series.isin(normalized_list)].copy()
 
     def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
-        """Filtra DataFrame por CNPJ do gestor"""
+        """Filtra DataFrame por CNPJ do gestor.
+        
+        Normaliza colunas e CNPJs automaticamente para garantir correspondências corretas.
+        Operações de normalização são idempotentes e podem ser chamadas múltiplas vezes.
+        
+        Args:
+            df: DataFrame com coluna CNPJ_GESTOR
+            gestor_cnpj_list: Lista de CNPJs de gestores (aceita formatos variados)
+            
+        Returns:
+            DataFrame filtrado contendo apenas fundos dos gestores especificados
+        """
         df = self._normalize_columns(df)
         df = self._apply_column_aliases(df)
         if 'CNPJ_GESTOR' not in df.columns:
@@ -190,7 +229,20 @@ class DataProcessor:
                             start_date: str,
                             end_date: str,
                             date_col: str = 'DT_COMPTC') -> pd.DataFrame:
-        """Filtra DataFrame por intervalo de datas"""
+        """Filtra DataFrame por intervalo de datas.
+        
+        Normaliza colunas automaticamente para garantir correspondências corretas.
+        Operações de normalização são idempotentes e podem ser chamadas múltiplas vezes.
+        
+        Args:
+            df: DataFrame com coluna de data
+            start_date: Data inicial do intervalo (formato ISO ou comparável)
+            end_date: Data final do intervalo (formato ISO ou comparável)
+            date_col: Nome da coluna de data (padrão: 'DT_COMPTC')
+            
+        Returns:
+            DataFrame filtrado contendo apenas linhas dentro do intervalo de datas
+        """
         df = self._normalize_columns(df)
         df = self._apply_column_aliases(df)
         if date_col not in df.columns:
