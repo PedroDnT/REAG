@@ -82,6 +82,28 @@ Identifica padrões suspeitos:
 - Runs de resgates consecutivos (5+ dias)
 - Divergências fluxo vs. performance
 
+### 5. Geração de Relatório Público
+
+```bash
+# Gerar relatório em Markdown
+python scripts/generate_public_report.py --format markdown
+
+# Gerar relatório em HTML
+python scripts/generate_public_report.py --format html
+
+# Gerar relatório em JSON
+python scripts/generate_public_report.py --format json
+
+# Especificar arquivo de saída
+python scripts/generate_public_report.py --format html --output meu_relatorio.html
+```
+
+Gera um relatório público agregando todas as anomalias detectadas:
+- Sumário executivo com estatísticas
+- Distribuição de severidade das anomalias
+- Detalhamento de achados (anonimizado)
+- Metodologia e disclaimer
+
 ## 📁 Estrutura do Projeto
 
 ```
@@ -97,6 +119,8 @@ REAG/
 │   ├── 02_identify_reag_funds.ipynb
 │   ├── 03_flow_analysis.ipynb
 │   └── 04_anomaly_detection.ipynb
+├── scripts/              # Scripts utilitários
+│   └── generate_public_report.py
 ├── data/
 │   ├── raw/             # Dados brutos da CVM
 │   └── processed/       # Dados processados
@@ -160,6 +184,7 @@ Para comparação detalhada de todos os métodos de detecção:
 - `reports/quedas_pl.csv`: Quedas bruscas de PL
 - `reports/runs_resgate.csv`: Runs detectadas
 - `reports/divergencias_flow_performance.csv`: Divergências
+- `reports/public_report.[md|html|json]`: Relatório público agregado
 
 ## 🧪 Testes
 
