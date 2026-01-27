@@ -172,38 +172,42 @@ class PublicReportGenerator:
         lines.append("")
         
         # Flow Anomalies
-        if not reports['flow_anomalies'].empty:
+        flow_anomalies = reports.get('flow_anomalies', pd.DataFrame())
+        if not flow_anomalies.empty:
             lines.append("### Flow Anomalies")
             lines.append("")
-            lines.append(f"Detected {len(reports['flow_anomalies'])} instances of unusual cash flow patterns.")
+            lines.append(f"Detected {len(flow_anomalies)} instances of unusual cash flow patterns.")
             lines.append("")
             
             # Top anomalies (anonymized)
-            df = self.anonymize_fund_data(reports['flow_anomalies'].head(10))
+            df = self.anonymize_fund_data(flow_anomalies.head(10))
             lines.append("#### Top 10 Anomalies")
             lines.append("")
             lines.append(df.to_markdown(index=False))
             lines.append("")
         
         # PL Drops
-        if not reports['pl_drops'].empty:
+        pl_drops = reports.get('pl_drops', pd.DataFrame())
+        if not pl_drops.empty:
             lines.append("### Significant PL Drops")
             lines.append("")
-            lines.append(f"Detected {len(reports['pl_drops'])} instances of portfolio value drops exceeding 20%.")
+            lines.append(f"Detected {len(pl_drops)} instances of portfolio value drops exceeding 20%.")
             lines.append("")
         
         # Runs
-        if not reports['runs'].empty:
+        runs = reports.get('runs', pd.DataFrame())
+        if not runs.empty:
             lines.append("### Redemption Runs")
             lines.append("")
-            lines.append(f"Detected {len(reports['runs'])} instances of sustained redemption periods (5+ consecutive days).")
+            lines.append(f"Detected {len(runs)} instances of sustained redemption periods (5+ consecutive days).")
             lines.append("")
         
         # Divergences
-        if not reports['divergences'].empty:
+        divergences = reports.get('divergences', pd.DataFrame())
+        if not divergences.empty:
             lines.append("### Flow-Performance Divergences")
             lines.append("")
-            lines.append(f"Detected {len(reports['divergences'])} instances where cash flows diverged significantly from fund performance.")
+            lines.append(f"Detected {len(divergences)} instances where cash flows diverged significantly from fund performance.")
             lines.append("")
         
         # Methodology
@@ -362,11 +366,12 @@ class PublicReportGenerator:
         """
         
         # Add flow anomalies table if present
-        if not reports['flow_anomalies'].empty:
-            df = self.anonymize_fund_data(reports['flow_anomalies'].head(10))
+        flow_anomalies = reports.get('flow_anomalies', pd.DataFrame())
+        if not flow_anomalies.empty:
+            df = self.anonymize_fund_data(flow_anomalies.head(10))
             html += f"""
         <h3>Flow Anomalies (Top 10)</h3>
-        <p>Detected {len(reports['flow_anomalies'])} instances of unusual cash flow patterns.</p>
+        <p>Detected {len(flow_anomalies)} instances of unusual cash flow patterns.</p>
         {df.to_html(index=False, classes='data-table')}
         """
         
