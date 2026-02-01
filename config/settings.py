@@ -24,7 +24,7 @@ class Config:
     # Período de análise padrão (com dados disponíveis)
     DEFAULT_START_YEAR = 2024
     DEFAULT_START_MONTH = 1
-    DEFAULT_END_YEAR = 2024
+    DEFAULT_END_YEAR = 2025
     DEFAULT_END_MONTH = 12  # Ajustar conforme disponibilidade
 
     # Disponibilidade conhecida de dados
