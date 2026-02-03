@@ -54,8 +54,24 @@ This document provides concrete, repeatable guidance for automated agents operat
   - CI environments should mirror local commands where possible.
   - Prefer `CI=true` to simulate CI conditions locally when needed.
 
+**B. Project Workflows & Commands**
+- Data collection and analysis (Jupyter)
+  - Collect CVM data: `jupyter lab notebooks/01_data_collection.ipynb`
+  - Identify REAG funds: `jupyter lab notebooks/02_identify_reag_funds.ipynb`
+  - Flow analysis: `jupyter lab notebooks/03_flow_analysis.ipynb`
+  - Anomaly detection: `jupyter lab notebooks/04_anomaly_detection.ipynb`
+- Public report generation (scripted)
+  - Markdown report: `python scripts/generate_public_report.py --format markdown`
+  - HTML report: `python scripts/generate_public_report.py --format html`
+  - JSON report: `python scripts/generate_public_report.py --format json`
+  - Custom output path: `python scripts/generate_public_report.py --format html --output meu_relatorio.html`
+- Data outputs (expected artifacts)
+  - Processed data: `data/processed/*.csv`
+  - Anomaly reports: `reports/*.csv`
+  - Aggregated public report: `reports/public_report.[md|html|json]`
 
-**B. How to Run a Single Test (Patterns)**
+
+**C. How to Run a Single Test (Patterns)**
 - Python/pytest: `pytest tests/module.py::TestClass::test_method` or `pytest tests/module.py::test_function`.
 - If you use `-k` for keyword, ensure pattern uniquely identifies the test to avoid flakiness.
 - Use markers to isolate test families (e.g., `-m unit`, `-m slow`).
@@ -148,6 +164,9 @@ This document provides concrete, repeatable guidance for automated agents operat
 **7. Update & Versioning**
 - Include a short rationale for changes when you modify this file.
 - Capture the PR/commit that introduced guideline changes for traceability.
+
+**Rationale Log**
+- 2025-02-14: Added repo-specific workflows and report commands to streamline consistent execution paths.
 
 
 **8. Quick Start Snippet**
