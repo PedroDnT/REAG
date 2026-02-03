@@ -5,6 +5,9 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.coverage
+.coverage.*
+.pytest_cache/
 venv/
 env/
 ENV/
