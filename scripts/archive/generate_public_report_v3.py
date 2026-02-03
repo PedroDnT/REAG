@@ -53,7 +53,7 @@ def _mask_cnpj(value: str) -> str:
   digits = re.sub(r"\D", "", str(value))
   if len(digits) < 14:
     return str(value)
-  return f"{digits[:2]}.{digits[2:5]}.***\/****-{digits[-2:]}"
+  return f"{digits[:2]}.{digits[2:5]}.***/****-{digits[-2:]}"
 
 
 def _plot_top_counts(series: pd.Series, title: str, output_name: str) -> str | None:
