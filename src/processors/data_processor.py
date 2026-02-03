@@ -64,10 +64,46 @@ class DataProcessor:
 
     @staticmethod
     def _normalize_cnpj_series(series: pd.Series) -> pd.Series:
-        """Normaliza CNPJ removendo pontuação e preservando NAs."""
-        cleaned = series.astype('string').str.replace(r'\D', '', regex=True)
-        cleaned = cleaned.where(cleaned.str.len() > 0)
-        return cleaned.str.zfill(14)
+        """Normaliza CNPJ removendo pontuação e preservando NAs.
+
+        Converte CNPJs para formato padronizado de 14 dígitos, removendo
+        pontuação e preenchendo com zeros à esquerda quando necessário.
+        CNPJs já formatados corretamente (14 dígitos numéricos) não são
+        reprocessados para melhor performance.
+
+        Args:
+            series: Série pandas contendo CNPJs em diversos formatos
+
+        Returns:
+            Série pandas com CNPJs normalizados (14 dígitos) ou NAs preservados
+
+        Note:
+            Requer pandas >= 1.0.0 para suporte ao dtype 'string'.
+            O projeto atualmente requer pandas >= 2.0.0.
+        """
+        # Convert to string type
+        str_series = series.astype('string')
+
+        # Check if values are already properly formatted (14 digits only)
+        # to avoid unnecessary reprocessing
+        is_already_formatted = (
+            str_series.str.match(r'^\d{14}$', na=False)
+        )
+
+        # Only process values that need normalization
+        needs_processing = ~is_already_formatted & str_series.notna()
+
+        result = str_series.copy()
+        if needs_processing.any():
+            # Remove non-digit characters and pad with zeros
+            to_process = str_series[needs_processing]
+            cleaned = to_process.str.replace(r'\D', '', regex=True)
+            # Filter out empty strings
+            cleaned = cleaned.where(cleaned.str.len() > 0)
+            # Pad with zeros to 14 digits
+            result[needs_processing] = cleaned.str.zfill(14)
+
+        return result
 
     @classmethod
     def _normalize_cnpj_list(cls, cnpj_list: List[str]) -> List[str]:
