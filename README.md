@@ -104,6 +104,28 @@ Gera um relatório público agregando todas as anomalias detectadas:
 - Detalhamento de achados (anonimizado)
 - Metodologia e disclaimer
 
+### 6. 🆕 Run de Investigação + Briefs (HTML/Markdown)
+
+Gera um run completo de investigação e cria um **brief (1 página)** por entidade/fundo sinalizado,
+além de um `report.html` com a lista de entidades priorizadas.
+
+```bash
+python scripts/run_investigation.py --run-id 20260203
+```
+
+**Saídas principais:**
+- `reports/investigation/<run_id>/report.html`
+- `reports/investigation/<run_id>/entities/<ENTITY_ID>/brief.html`
+- `reports/investigation/<run_id>/entities/<ENTITY_ID>/brief.md`
+- `reports/investigation/<run_id>/entities/<ENTITY_ID>/evidence.json`
+
+**Contexto externo (opcional / fase 2):**
+
+```bash
+export EXA_API_KEY=...
+python scripts/run_investigation.py --enable-enrichment
+```
+
 ## 📁 Estrutura do Projeto
 
 ```
