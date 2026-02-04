@@ -1,5 +1,0 @@
-agent:
-  name: example-agent
-  description: |
-    This agent does X, Y and Z and when to use it.
-  model: some-model
