@@ -104,6 +104,17 @@ Gera um relatório público agregando todas as anomalias detectadas:
 - Detalhamento de achados (anonimizado)
 - Metodologia e disclaimer
 
+### 6. Automação de fluxo com Playwright
+
+Para automatizar um fluxo de navegador com Playwright, configure as variáveis de
+ambiente e execute:
+
+```bash
+python scripts/playwright_workflow.py
+```
+
+Consulte `docs/playwright_workflow.md` para os detalhes de configuração.
+
 ## 📁 Estrutura do Projeto
 
 ```
