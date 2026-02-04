@@ -104,27 +104,16 @@ Gera um relatório público agregando todas as anomalias detectadas:
 - Detalhamento de achados (anonimizado)
 - Metodologia e disclaimer
 
-### 6. 🆕 Run de Investigação + Briefs (HTML/Markdown)
+### 6. Automação de fluxo com Playwright
 
-Gera um run completo de investigação e cria um **brief (1 página)** por entidade/fundo sinalizado,
-além de um `report.html` com a lista de entidades priorizadas.
-
-```bash
-python scripts/run_investigation.py --run-id 20260203
-```
-
-**Saídas principais:**
-- `reports/investigation/<run_id>/report.html`
-- `reports/investigation/<run_id>/entities/<ENTITY_ID>/brief.html`
-- `reports/investigation/<run_id>/entities/<ENTITY_ID>/brief.md`
-- `reports/investigation/<run_id>/entities/<ENTITY_ID>/evidence.json`
-
-**Contexto externo (opcional / fase 2):**
+Para automatizar um fluxo de navegador com Playwright, configure as variáveis de
+ambiente e execute:
 
 ```bash
-export EXA_API_KEY=...
-python scripts/run_investigation.py --enable-enrichment
+python scripts/playwright_workflow.py
 ```
+
+Consulte `docs/playwright_workflow.md` para os detalhes de configuração.
 
 ## 📁 Estrutura do Projeto
 
