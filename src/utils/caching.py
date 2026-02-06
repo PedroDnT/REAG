@@ -3,11 +3,14 @@ Caching utilities for expensive operations.
 """
 
 import json
+import logging
 import pickle
 from pathlib import Path
 from typing import Any, Optional, Callable
 from datetime import datetime, timedelta
 import hashlib
+
+logger = logging.getLogger(__name__)
 
 
 class CacheManager:
@@ -98,8 +101,8 @@ class CacheManager:
             else:
                 with open(cache_path, 'w') as f:
                     json.dump(value, f, indent=2, default=str)
-        except (IOError, pickle.PickleError, TypeError):
-            pass  # Silently fail on cache write errors
+        except (IOError, pickle.PickleError, TypeError) as exc:
+            logger.warning("Cache write failed for key %s: %s", key, exc)
 
     def clear(self, key: Optional[str] = None) -> None:
         """

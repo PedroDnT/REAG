@@ -5,10 +5,14 @@ Detecta concentração excessiva em poucos ativos, violações regulatórias
 e exposição a partes relacionadas.
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Set
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ConcentrationAnalyzer:
@@ -43,7 +47,7 @@ class ConcentrationAnalyzer:
             categories: Dict {CNPJ_FUNDO: categoria}
         """
         self.fund_categories = categories
-        print(f"✅ {len(self.fund_categories):,} fundos categorizados")
+        logger.info(f"{len(self.fund_categories):,} fundos categorizados")
 
     def set_related_issuers(self, issuers: Set[str]):
         """
@@ -53,7 +57,7 @@ class ConcentrationAnalyzer:
             issuers: Set de emissores relacionados
         """
         self.related_issuers = issuers
-        print(f"✅ {len(self.related_issuers)} emissores relacionados cadastrados")
+        logger.info(f"{len(self.related_issuers)} emissores relacionados cadastrados")
 
     def calculate_herfindahl_index(self, portfolio_df: pd.DataFrame) -> float:
         """
@@ -164,7 +168,7 @@ class ConcentrationAnalyzer:
         Returns:
             DataFrame com fundos que violam limites
         """
-        print("🔍 Detectando concentração excessiva...")
+        logger.info("Detectando concentracao excessiva...")
 
         if target_funds is None:
             target_funds = cda_df['CNPJ_FUNDO'].unique()
@@ -210,9 +214,9 @@ class ConcentrationAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('top1_pct', ascending=False)
-            print(f"⚠️  {len(result_df)} fundos com concentração excessiva!")
+            logger.warning(f"{len(result_df)} fundos com concentracao excessiva!")
         else:
-            print("✅ Nenhuma violação de concentração detectada")
+            logger.info("Nenhuma violacao de concentracao detectada")
 
         return result_df
 
@@ -228,15 +232,15 @@ class ConcentrationAnalyzer:
         Returns:
             DataFrame com fundos concentrados em partes relacionadas
         """
-        print("🔍 Detectando concentração em partes relacionadas...")
+        logger.info("Detectando concentracao em partes relacionadas...")
 
         if not self.related_issuers:
-            print("⚠️  Nenhum emissor relacionado cadastrado")
+            logger.warning("Nenhum emissor relacionado cadastrado")
             return pd.DataFrame()
 
         if 'EMISSOR' not in cda_df.columns:
             # Tentar extrair emissor do código do ativo
-            print("⚠️  Coluna EMISSOR não encontrada no CDA")
+            logger.warning("Coluna EMISSOR nao encontrada no CDA")
             return pd.DataFrame()
 
         if target_funds is None:
@@ -283,9 +287,9 @@ class ConcentrationAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('related_party_pct', ascending=False)
-            print(f"⚠️  {len(result_df)} fundos com concentração em partes relacionadas!")
+            logger.warning(f"{len(result_df)} fundos com concentracao em partes relacionadas!")
         else:
-            print("✅ Nenhuma concentração em partes relacionadas detectada")
+            logger.info("Nenhuma concentracao em partes relacionadas detectada")
 
         return result_df
 
@@ -301,16 +305,16 @@ class ConcentrationAnalyzer:
         Returns:
             DataFrame com evolução temporal
         """
-        print(f"📊 Analisando evolução de concentração para {fund_cnpj}...")
+        logger.info(f"Analisando evolucao de concentracao para {fund_cnpj}...")
 
         if 'DT_COMPTC' not in cda_df.columns:
-            print("⚠️  Coluna DT_COMPTC não encontrada")
+            logger.warning("Coluna DT_COMPTC nao encontrada")
             return pd.DataFrame()
 
         portfolio = cda_df[cda_df['CNPJ_FUNDO'] == fund_cnpj].copy()
 
         if portfolio.empty:
-            print("⚠️  Fundo não encontrado")
+            logger.warning("Fundo nao encontrado")
             return pd.DataFrame()
 
         # Agrupar por data
@@ -333,9 +337,9 @@ class ConcentrationAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('date')
-            print(f"✅ {len(result_df)} snapshots temporais")
+            logger.info(f"{len(result_df)} snapshots temporais")
         else:
-            print("⚠️  Nenhum dado temporal disponível")
+            logger.warning("Nenhum dado temporal disponivel")
 
         return result_df
 
@@ -353,9 +357,9 @@ class ConcentrationAnalyzer:
         Returns:
             Dict com DataFrames de análises
         """
-        print("\n" + "="*60)
-        print("📊 ANÁLISE DE CONCENTRAÇÃO DE CARTEIRAS")
-        print("="*60)
+        logger.info("=" * 60)
+        logger.info("ANALISE DE CONCENTRACAO DE CARTEIRAS")
+        logger.info("=" * 60)
 
         # Concentração excessiva
         excessive_conc = self.detect_excessive_concentration(cda_df, target_funds)
@@ -371,29 +375,27 @@ class ConcentrationAnalyzer:
             if not excessive_conc.empty:
                 file1 = output_path / 'excessive_concentration.csv'
                 excessive_conc.to_csv(file1, index=False)
-                print(f"💾 Excessive concentration: {file1}")
+                logger.info(f"Excessive concentration saved: {file1}")
 
             if not related_party.empty:
                 file2 = output_path / 'related_party_concentration.csv'
                 related_party.to_csv(file2, index=False)
-                print(f"💾 Related party concentration: {file2}")
+                logger.info(f"Related party concentration saved: {file2}")
 
         # Resumo
-        print("\n" + "="*60)
-        print("📋 RESUMO")
-        print("="*60)
+        logger.info("=" * 60)
+        logger.info("RESUMO")
+        logger.info("=" * 60)
 
-        print(f"\n⚠️  Fundos com concentração excessiva: {len(excessive_conc)}")
-        print(f"🚨 Fundos com concentração em partes relacionadas: {len(related_party)}")
+        logger.warning(f"Fundos com concentracao excessiva: {len(excessive_conc)}")
+        logger.warning(f"Fundos com concentracao em partes relacionadas: {len(related_party)}")
 
         if not excessive_conc.empty:
-            print("\n🔝 Top 5 por concentração:")
             top5 = excessive_conc.head(5)[['CNPJ_FUNDO', 'top1_pct', 'hhi', 'severity']]
-            print(top5.to_string(index=False))
+            logger.info(f"Top 5 por concentracao:\n{top5.to_string(index=False)}")
 
         if not related_party.empty:
-            print("\n🔴 Concentração em partes relacionadas:")
-            print(related_party[['CNPJ_FUNDO', 'related_party_pct', 'num_related_positions']].to_string(index=False))
+            logger.info(f"Concentracao em partes relacionadas:\n{related_party[['CNPJ_FUNDO', 'related_party_pct', 'num_related_positions']].to_string(index=False)}")
 
         return {
             'excessive_concentration': excessive_conc,

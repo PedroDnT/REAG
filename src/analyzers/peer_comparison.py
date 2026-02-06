@@ -5,11 +5,15 @@ Detecta fundos com performance anormalmente diferente de fundos similares,
 indicando possível manipulação ou fraude.
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
 from pathlib import Path
 from scipy import stats
+
+logger = logging.getLogger(__name__)
 
 
 class PeerComparisonAnalyzer:
@@ -35,10 +39,10 @@ class PeerComparisonAnalyzer:
         Args:
             cadastro_df: DataFrame do cadastro CVM
         """
-        print("📂 Carregando categorias de fundos...")
+        logger.info("Carregando categorias de fundos...")
 
         if 'CNPJ_FUNDO' not in cadastro_df.columns:
-            print("⚠️  Coluna CNPJ_FUNDO não encontrada")
+            logger.warning("Coluna CNPJ_FUNDO nao encontrada")
             return
 
         # Mapear classe para categoria
@@ -60,12 +64,11 @@ class PeerComparisonAnalyzer:
         
         self.fund_categories = dict(zip(cadastro_df['CNPJ_FUNDO'], mapped_categories))
 
-        print(f"✅ {len(self.fund_categories):,} fundos categorizados")
+        logger.info(f"{len(self.fund_categories):,} fundos categorizados")
 
         # Mostrar distribuição
         categories_dist = pd.Series(self.fund_categories).value_counts()
-        print("\n📊 Distribuição por categoria:")
-        print(categories_dist)
+        logger.info(f"Distribuicao por categoria:\n{categories_dist}")
 
     def calculate_fund_metrics(self, informe_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -77,7 +80,7 @@ class PeerComparisonAnalyzer:
         Returns:
             DataFrame com métricas por fundo
         """
-        print("📊 Calculando métricas de fundos...")
+        logger.info("Calculando metricas de fundos...")
 
         # Verificar colunas necessárias
         required_cols = ['CNPJ_FUNDO', 'DT_COMPTC', 'VL_QUOTA']
@@ -126,7 +129,7 @@ class PeerComparisonAnalyzer:
             })
 
         metrics_df = pd.DataFrame(metrics)
-        print(f"✅ Métricas calculadas para {len(metrics_df):,} fundos")
+        logger.info(f"Metricas calculadas para {len(metrics_df):,} fundos")
 
         return metrics_df
 
@@ -142,13 +145,13 @@ class PeerComparisonAnalyzer:
         Returns:
             DataFrame com comparação e outliers
         """
-        print(f"🔍 Comparando {len(target_funds)} fundos com peers...")
+        logger.info(f"Comparando {len(target_funds)} fundos com peers...")
 
         comparisons = []
 
         for cnpj in target_funds:
             if cnpj not in all_metrics_df['CNPJ_FUNDO'].values:
-                print(f"⚠️  Fundo {cnpj} não encontrado nas métricas")
+                logger.warning(f"Fundo {cnpj} nao encontrado nas metricas")
                 continue
 
             # Métricas do fundo alvo
@@ -162,7 +165,7 @@ class PeerComparisonAnalyzer:
             ]
 
             if len(peers) < 5:
-                print(f"⚠️  Poucos peers para {cnpj} (categoria: {category})")
+                logger.warning(f"Poucos peers para {cnpj} (categoria: {category})")
                 continue
 
             # Calcular Z-scores vs peers
@@ -225,11 +228,11 @@ class PeerComparisonAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('return_zscore', ascending=False)
-            print(f"\n✅ Comparação concluída: {len(result_df)} fundos analisados")
-            print(f"⚠️  Outliers detectados: {result_df['is_outlier'].sum()}")
+            logger.info(f"Comparacao concluida: {len(result_df)} fundos analisados")
+            logger.warning(f"Outliers detectados: {result_df['is_outlier'].sum()}")
         else:
-            print(f"\n✅ Comparação concluída: {len(result_df)} fundos analisados")
-            print("ℹ️  Nenhum fundo com peers suficientes para comparação")
+            logger.info(f"Comparacao concluida: {len(result_df)} fundos analisados")
+            logger.info("Nenhum fundo com peers suficientes para comparacao")
 
         return result_df
 
@@ -269,7 +272,7 @@ class PeerComparisonAnalyzer:
         Returns:
             DataFrame com fundos suspeitos
         """
-        print("🔍 Detectando retornos suavizados (Ponzi-like)...")
+        logger.info("Detectando retornos suavizados (Ponzi-like)...")
 
         suspicious = []
 
@@ -321,9 +324,9 @@ class PeerComparisonAnalyzer:
 
         if not result_df.empty:
             result_df = result_df.sort_values('sharpe_ratio', ascending=False)
-            print(f"⚠️  {len(result_df)} fundos com retornos suspeitos!")
+            logger.warning(f"{len(result_df)} fundos com retornos suspeitos!")
         else:
-            print("✅ Nenhum padrão de suavização detectado")
+            logger.info("Nenhum padrao de suavizacao detectado")
 
         return result_df
 
@@ -341,9 +344,9 @@ class PeerComparisonAnalyzer:
         Returns:
             Dict com DataFrames de análises
         """
-        print("\n" + "="*60)
-        print("📊 ANÁLISE DE COMPARAÇÃO COM PEERS")
-        print("="*60)
+        logger.info("=" * 60)
+        logger.info("ANALISE DE COMPARACAO COM PEERS")
+        logger.info("=" * 60)
 
         # Calcular métricas de todos os fundos
         all_metrics = self.calculate_fund_metrics(informe_df)
@@ -362,26 +365,25 @@ class PeerComparisonAnalyzer:
             if not peer_comparison.empty:
                 file1 = output_path / 'peer_comparison.csv'
                 peer_comparison.to_csv(file1, index=False)
-                print(f"💾 Peer comparison: {file1}")
+                logger.info(f"Peer comparison saved: {file1}")
 
             if not smoothed_returns.empty:
                 file2 = output_path / 'smoothed_returns.csv'
                 smoothed_returns.to_csv(file2, index=False)
-                print(f"💾 Smoothed returns: {file2}")
+                logger.info(f"Smoothed returns saved: {file2}")
 
         # Resumo
-        print("\n" + "="*60)
-        print("📋 RESUMO")
-        print("="*60)
+        logger.info("=" * 60)
+        logger.info("RESUMO")
+        logger.info("=" * 60)
 
-        print(f"\n📊 Fundos analisados: {len(target_funds)}")
-        print(f"⚠️  Outliers (|Z| > 3): {peer_comparison['is_outlier'].sum() if not peer_comparison.empty else 0}")
-        print(f"🚨 Retornos suavizados: {len(smoothed_returns)}")
+        logger.info(f"Fundos analisados: {len(target_funds)}")
+        logger.warning(f"Outliers (|Z| > 3): {peer_comparison['is_outlier'].sum() if not peer_comparison.empty else 0}")
+        logger.warning(f"Retornos suavizados: {len(smoothed_returns)}")
 
         if not peer_comparison.empty and peer_comparison['is_outlier'].any():
-            print("\n🔝 Top outliers:")
             outliers = peer_comparison[peer_comparison['is_outlier']]
-            print(outliers[['CNPJ_FUNDO', 'fraud_flag', 'return_zscore', 'sharpe_zscore']].head())
+            logger.info(f"Top outliers:\n{outliers[['CNPJ_FUNDO', 'fraud_flag', 'return_zscore', 'sharpe_zscore']].head()}")
 
         return {
             'all_metrics': all_metrics,

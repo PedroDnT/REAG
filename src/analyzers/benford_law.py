@@ -13,12 +13,16 @@ Fabricated numbers tend to deviate from this distribution.
 Successfully used in Enron fraud detection and financial forensics.
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from scipy import stats
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
 
 
 class BenfordLawAnalyzer:
@@ -273,7 +277,7 @@ class BenfordLawAnalyzer:
         Returns:
             DataFrame with analysis results per fund
         """
-        print("🔍 Analyzing funds for Benford's Law compliance...")
+        logger.info("Analyzing funds for Benford's Law compliance...")
         
         results = []
         
@@ -362,11 +366,10 @@ class BenfordLawAnalyzer:
             result_df = result_df.sort_values('overall_fraud_risk', 
                                              key=lambda x: x.map(risk_scores),
                                              ascending=False)
-            print(f"⚠️  {len(result_df)} funds show Benford's Law anomalies")
-            print("\nRisk breakdown:")
-            print(result_df['overall_fraud_risk'].value_counts())
+            logger.warning(f"{len(result_df)} funds show Benford's Law anomalies")
+            logger.info(f"Risk breakdown:\n{result_df['overall_fraud_risk'].value_counts()}")
         else:
-            print("✅ All funds conform to Benford's Law")
+            logger.info("All funds conform to Benford's Law")
         
         return result_df
     
@@ -405,7 +408,7 @@ class BenfordLawAnalyzer:
         
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            print(f"📊 Plot saved to {save_path}")
+            logger.info(f"Plot saved to {save_path}")
         
         return fig
     
@@ -423,9 +426,9 @@ class BenfordLawAnalyzer:
         Returns:
             Dictionary with report data
         """
-        print("\n" + "="*70)
-        print("📊 BENFORD'S LAW FRAUD DETECTION REPORT")
-        print("="*70)
+        logger.info("=" * 70)
+        logger.info("BENFORD'S LAW FRAUD DETECTION REPORT")
+        logger.info("=" * 70)
         
         # Analyze all funds
         fund_results = self.analyze_fund_data(informe_df, cda_df)
@@ -437,7 +440,7 @@ class BenfordLawAnalyzer:
             
             results_path = output_dir / 'benford_law_analysis.csv'
             fund_results.to_csv(results_path, index=False)
-            print(f"\n💾 Results saved to {results_path}")
+            logger.info(f"Results saved to {results_path}")
         
         # Summary statistics
         summary = {
@@ -448,18 +451,18 @@ class BenfordLawAnalyzer:
             'medium_risk_funds': len(fund_results[fund_results['overall_fraud_risk'] == 'MEDIUM'])
         }
         
-        print("\n" + "="*70)
-        print("📈 SUMMARY")
-        print("="*70)
-        print(f"Total funds analyzed: {summary['total_funds_analyzed']}")
-        print(f"Funds with anomalies: {summary['funds_with_anomalies']}")
-        print(f"  - CRITICAL risk: {summary['critical_risk_funds']}")
-        print(f"  - HIGH risk: {summary['high_risk_funds']}")
-        print(f"  - MEDIUM risk: {summary['medium_risk_funds']}")
-        
+        logger.info("=" * 70)
+        logger.info("SUMMARY")
+        logger.info("=" * 70)
+        logger.info(f"Total funds analyzed: {summary['total_funds_analyzed']}")
+        logger.info(f"Funds with anomalies: {summary['funds_with_anomalies']}")
+        logger.info(f"  - CRITICAL risk: {summary['critical_risk_funds']}")
+        logger.info(f"  - HIGH risk: {summary['high_risk_funds']}")
+        logger.info(f"  - MEDIUM risk: {summary['medium_risk_funds']}")
+
         if summary['critical_risk_funds'] > 0:
-            print("\n⚠️  CRITICAL: Some funds show strong evidence of number fabrication!")
-            print("   Recommend immediate investigation.")
+            logger.warning("CRITICAL: Some funds show strong evidence of number fabrication!")
+            logger.warning("   Recommend immediate investigation.")
         
         return {
             'summary': summary,

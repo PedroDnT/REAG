@@ -1,7 +1,11 @@
+import logging
+
 import pandas as pd
 from pathlib import Path
 from typing import Optional, List
 from config.settings import Config
+
+logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
@@ -54,7 +58,7 @@ class DataProcessor:
             if col not in df.columns:
                 continue
             series = df[col]
-            if series.dtype == object:
+            if pd.api.types.is_string_dtype(series) or series.dtype == object:
                 # Use str.translate for faster simultaneous replacements
                 cleaned = series.astype(str).str.translate(DataProcessor._BRAZILIAN_NUMBER_TRANS)
                 df[col] = pd.to_numeric(cleaned, errors='coerce')
@@ -137,7 +141,7 @@ class DataProcessor:
 
             return df
         except Exception as e:
-            print(f"Erro ao ler Informe Diário {file_path}: {e}")
+            logger.error(f"Erro ao ler Informe Diario {file_path}: {e}")
             return pd.DataFrame()
 
     def read_cda(self, file_path: Path,
@@ -164,7 +168,7 @@ class DataProcessor:
 
             return df
         except Exception as e:
-            print(f"Erro ao ler CDA {file_path}: {e}")
+            logger.error(f"Erro ao ler CDA {file_path}: {e}")
             return pd.DataFrame()
 
     def read_cadastro(self, file_path: Path,
@@ -190,7 +194,7 @@ class DataProcessor:
 
             return df
         except Exception as e:
-            print(f"Erro ao ler Cadastro {file_path}: {e}")
+            logger.error(f"Erro ao ler Cadastro {file_path}: {e}")
             return pd.DataFrame()
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -276,5 +280,5 @@ class DataProcessor:
         """Salva dados processados"""
         output_path = self.config.PROCESSED_DATA_DIR / filename
         df.to_csv(output_path, index=False, encoding='utf-8', sep=';')
-        print(f"Dados salvos em: {output_path}")
+        logger.info(f"Dados salvos em: {output_path}")
         return output_path

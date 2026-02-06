@@ -1,13 +1,9 @@
 import pytest
 import pandas as pd
-import sys
 from pathlib import Path
 import json
 import tempfile
 import shutil
-
-# Add parent directory to path
-sys.path.append(str(Path(__file__).parent.parent))
 
 from scripts.generate_public_report import PublicReportGenerator
 from config.settings import Config

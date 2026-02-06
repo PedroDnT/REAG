@@ -21,7 +21,7 @@ def test_context_writer_stable_output():
     ]
     context = build_context_section(results)
     assert context["available"] is True
-    assert "verify" in context["overview"].lower()
+    assert "verified" in context["overview"].lower()
     assert context["citations"][0]["url"] == "https://example.com/a"
     assert context["timeline"][0]["date"] == "2026-01-01"
 
