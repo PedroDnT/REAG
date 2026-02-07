@@ -14,7 +14,7 @@ from pathlib import Path
 from scipy import stats
 from config.constants import (
     MIN_OBSERVATIONS,
-    PONZI_LOW_VOLATILITY,
+    PONZI_LOW_VOLATILITY_PCT,
     PONZI_MIN_RETURN,
     PONZI_POSITIVE_DAYS_PCT,
     PONZI_SHARPE_THRESHOLD,
@@ -311,7 +311,7 @@ class PeerComparisonAnalyzer:
 
             # Red flags
             is_suspicious = (
-                (volatility < PONZI_LOW_VOLATILITY * 10 and avg_return > PONZI_MIN_RETURN) or  # Vol muito baixa com retorno positivo
+                (volatility < PONZI_LOW_VOLATILITY_PCT and avg_return > PONZI_MIN_RETURN) or  # Vol muito baixa com retorno positivo
                 (positive_days_pct > PONZI_POSITIVE_DAYS_PCT) or  # >90% dias positivos
                 (sharpe > PONZI_SHARPE_THRESHOLD)  # Sharpe muito alto
             )

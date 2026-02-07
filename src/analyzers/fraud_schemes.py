@@ -21,7 +21,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from config.constants import (
     ASSET_INFLATION_ILLIQUID_PCT,
-    ASSET_INFLATION_MIN_RETURN,
+    ASSET_INFLATION_MIN_RETURN_PCT,
     SHELL_NETWORK_MIN_COUNT,
 )
 
@@ -235,7 +235,7 @@ class FraudSchemeDetector:
                 pl_change = fund_performance['VL_PATRIM_LIQ'].pct_change().mean() * 100
 
                 # Red flags
-                if (illiquid_pct > ASSET_INFLATION_ILLIQUID_PCT and avg_return > ASSET_INFLATION_MIN_RETURN * 100):
+                if (illiquid_pct > ASSET_INFLATION_ILLIQUID_PCT and avg_return > ASSET_INFLATION_MIN_RETURN_PCT):
                     # >70% ilíquido com retorno >0.5% ao dia = suspeito
                     inflation_cases.append({
                         'fund_cnpj': fund_cnpj,
