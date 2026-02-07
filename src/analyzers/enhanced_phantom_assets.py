@@ -9,12 +9,16 @@ This module distinguishes between:
 Based on research of Banco Master/REAG fraud scheme.
 """
 
+import logging
+
 import pandas as pd
 import requests
-from typing import Set, Dict, List, Optional, Tuple
+from typing import Any, Set, Dict, List, Optional, Tuple
 from pathlib import Path
 import json
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class EnhancedPhantomAssetDetector:
@@ -80,7 +84,7 @@ class EnhancedPhantomAssetDetector:
             ]
         }
 
-    def classify_asset_type(self, asset_code: str) -> Dict[str, any]:
+    def classify_asset_type(self, asset_code: str) -> Dict[str, Any]:
         """
         Classifica tipo de ativo e determina método de validação
 
@@ -324,7 +328,7 @@ class EnhancedPhantomAssetDetector:
             - SUSPICIOUS_PRIVATE (privados com red flags)
             - NEEDS_REVIEW (privados que precisam verificação manual)
         """
-        print("🔍 Detectando ativos suspeitos (enhanced)...")
+        logger.info("Detectando ativos suspeitos (enhanced)...")
 
         if 'CD_ATIVO' not in cda_df.columns:
             raise ValueError("DataFrame deve conter coluna 'CD_ATIVO'")
@@ -332,7 +336,7 @@ class EnhancedPhantomAssetDetector:
         results = []
         unique_assets = cda_df['CD_ATIVO'].unique()
 
-        print(f"📊 Analisando {len(unique_assets):,} ativos únicos...")
+        logger.info(f"Analisando {len(unique_assets):,} ativos unicos...")
 
         for asset_code in unique_assets:
             # Pegar informações adicionais
@@ -366,14 +370,12 @@ class EnhancedPhantomAssetDetector:
         if not result_df.empty:
             result_df = result_df.sort_values('fraud_risk', ascending=False)
 
-        print(f"\n⚠️  {len(result_df)} ativos suspeitos detectados!")
+        logger.warning(f"{len(result_df)} ativos suspeitos detectados!")
 
         # Breakdown por categoria
         if not result_df.empty:
-            print("\n📊 Breakdown por tipo de risco:")
-            print(result_df['fraud_risk'].value_counts())
-            print("\n📊 Breakdown por status:")
-            print(result_df['status'].value_counts())
+            logger.info(f"Breakdown por tipo de risco:\n{result_df['fraud_risk'].value_counts()}")
+            logger.info(f"Breakdown por status:\n{result_df['status'].value_counts()}")
 
         return result_df
 
@@ -413,4 +415,4 @@ class EnhancedPhantomAssetDetector:
         df = pd.read_csv(cadastro_path, encoding='latin1', sep=';')
         if 'CNPJ_FUNDO' in df.columns:
             self.valid_funds = set(df['CNPJ_FUNDO'].dropna().astype(str))
-            print(f"✅ {len(self.valid_funds):,} fundos carregados")
+            logger.info(f"{len(self.valid_funds):,} fundos carregados")

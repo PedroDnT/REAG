@@ -4,11 +4,15 @@ Base Analyzer Class
 Provides common functionality for all fraud detection analyzers.
 """
 
+import logging
+
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import pandas as pd
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class BaseAnalyzer(ABC):
@@ -77,13 +81,13 @@ class BaseAnalyzer(ABC):
         else:
             raise ValueError(f"Unsupported format: {format}")
 
-        print(f"✅ Report saved: {output_path}")
+        logger.info(f"Report saved: {output_path}")
         return output_path
 
     def validate_dataframe(
         self,
         df: pd.DataFrame,
-        required_columns: list,
+        required_columns: List[str],
         name: str = "DataFrame"
     ) -> None:
         """
@@ -113,15 +117,14 @@ class BaseAnalyzer(ABC):
             message: Message to log
             level: Log level (INFO, WARNING, ERROR)
         """
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        prefix = {
-            "INFO": "ℹ️ ",
-            "WARNING": "⚠️ ",
-            "ERROR": "❌",
-            "SUCCESS": "✅"
-        }.get(level, "")
-
-        print(f"{prefix}{message}")
+        level_map = {
+            "INFO": logger.info,
+            "WARNING": logger.warning,
+            "ERROR": logger.error,
+            "SUCCESS": logger.info,
+        }
+        log_func = level_map.get(level, logger.info)
+        log_func(message)
 
     def create_summary_stats(self, df: pd.DataFrame, group_by: Optional[str] = None) -> Dict[str, Any]:
         """

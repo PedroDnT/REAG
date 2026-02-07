@@ -1,8 +1,12 @@
+import logging
+
 import pandas as pd
 import numpy as np
 from scipy import stats
 from typing import Optional, Tuple
 from config.settings import Config
+
+logger = logging.getLogger(__name__)
 
 
 class AnomalyDetector:
@@ -24,7 +28,7 @@ class AnomalyDetector:
         Retorna DataFrame com apenas registros anômalos
         """
         if flow_col not in df.columns:
-            print(f"Coluna {flow_col} não encontrada")
+            logger.warning(f"Coluna {flow_col} nao encontrada")
             return pd.DataFrame()
 
         df = df.copy()
