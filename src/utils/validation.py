@@ -64,7 +64,7 @@ def validate_cnpj(cnpj: str) -> bool:
 
 
 def validate_date(
-    date_value,
+    date_value: 'Union[str, datetime, pd.Timestamp]',
     min_date: Optional[datetime] = None,
     max_date: Optional[datetime] = None
 ) -> bool:
