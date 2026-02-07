@@ -12,11 +12,15 @@ Sources:
 - Academic research on investment fraud
 """
 
+import logging
+
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 class FraudSchemeDetector:
@@ -53,7 +57,7 @@ class FraudSchemeDetector:
         - Fluxos entre fundos do mesmo administrador
         - Timing suspeito (captação → aplicação → retorno rápido)
         """
-        print("🔍 Detectando fluxo circular (Banco Master pattern)...")
+        logger.info("Detectando fluxo circular (Banco Master pattern)...")
 
         circular_flows = []
 
@@ -90,9 +94,9 @@ class FraudSchemeDetector:
         result_df = pd.DataFrame(circular_flows)
 
         if not result_df.empty:
-            print(f"🚨 {len(result_df)} casos de fluxo circular detectados!")
+            logger.warning(f"{len(result_df)} casos de fluxo circular detectados!")
         else:
-            print("✅ Nenhum fluxo circular detectado")
+            logger.info("Nenhum fluxo circular detectado")
 
         return result_df
 
@@ -114,7 +118,7 @@ class FraudSchemeDetector:
         - Retornos muito altos em curto período
         - Fundos recentes com performance "milagrosa"
         """
-        print("🔍 Detectando fundos em camadas...")
+        logger.info("Detectando fundos em camadas...")
 
         layered_structures = []
 
@@ -122,51 +126,57 @@ class FraudSchemeDetector:
         fund_holdings = cda_df[cda_df['CD_ATIVO'].str.len() == 14].copy()  # CNPJs = fundos
 
         if fund_holdings.empty:
-            print("✅ Nenhuma estrutura de camadas detectada")
+            logger.info("Nenhuma estrutura de camadas detectada")
             return pd.DataFrame()
 
         # Mapear administrador de cada fundo
         fund_to_admin = cadastro_df.set_index('CNPJ_FUNDO')['CNPJ_ADMIN'].to_dict()
 
-        for idx, row in fund_holdings.iterrows():
-            holder_fund = row['CNPJ_FUNDO']
-            held_fund = row['CD_ATIVO']
+        # Vectorized approach: add admin columns to fund_holdings
+        fund_holdings['holder_admin'] = fund_holdings['CNPJ_FUNDO'].map(fund_to_admin)
+        fund_holdings['held_admin'] = fund_holdings['CD_ATIVO'].map(fund_to_admin)
+        
+        # Filter to same admin only (much faster than checking in loop)
+        same_admin = fund_holdings[
+            (fund_holdings['holder_admin'].notna()) & 
+            (fund_holdings['held_admin'].notna()) &
+            (fund_holdings['holder_admin'] == fund_holdings['held_admin'])
+        ]
+        
+        # Use itertuples for remaining processing (10-100x faster than iterrows)
+        for row in same_admin.itertuples():
+            holder_fund = row.CNPJ_FUNDO
+            held_fund = row.CD_ATIVO
+            holder_admin = row.holder_admin
 
-            # Verificar se são do mesmo administrador
-            holder_admin = fund_to_admin.get(holder_fund)
-            held_admin = fund_to_admin.get(held_fund)
+            # Verificar retornos recentes
+            holder_returns = informe_df[informe_df['CNPJ_FUNDO'] == holder_fund]
+            held_returns = informe_df[informe_df['CNPJ_FUNDO'] == held_fund]
 
-            if holder_admin and held_admin and holder_admin == held_admin:
-                # Mesmo administrador! Red flag
+            if not holder_returns.empty and not held_returns.empty:
+                holder_avg_return = holder_returns['VL_QUOTA'].pct_change().mean() * 100
+                held_avg_return = held_returns['VL_QUOTA'].pct_change().mean() * 100
 
-                # Verificar retornos recentes
-                holder_returns = informe_df[informe_df['CNPJ_FUNDO'] == holder_fund]
-                held_returns = informe_df[informe_df['CNPJ_FUNDO'] == held_fund]
-
-                if not holder_returns.empty and not held_returns.empty:
-                    holder_avg_return = holder_returns['VL_QUOTA'].pct_change().mean() * 100
-                    held_avg_return = held_returns['VL_QUOTA'].pct_change().mean() * 100
-
-                    # Red flag se retornos muito altos
-                    if holder_avg_return > 1 or held_avg_return > 1:  # > 1% ao dia
-                        layered_structures.append({
-                            'admin_cnpj': holder_admin,
-                            'holder_fund': holder_fund,
-                            'held_fund': held_fund,
-                            'investment_value': row['VL_MERCADO'],
-                            'holder_avg_daily_return': holder_avg_return,
-                            'held_avg_daily_return': held_avg_return,
-                            'fraud_pattern': 'LAYERED_FUND_STRUCTURE',
-                            'severity': 'HIGH' if holder_avg_return > 2 else 'MEDIUM',
-                            'banco_master_similarity': 'MEDIUM'
-                        })
+                # Red flag se retornos muito altos
+                if holder_avg_return > 1 or held_avg_return > 1:  # > 1% ao dia
+                    layered_structures.append({
+                        'admin_cnpj': holder_admin,
+                        'holder_fund': holder_fund,
+                        'held_fund': held_fund,
+                        'investment_value': row.VL_MERCADO,
+                        'holder_avg_daily_return': holder_avg_return,
+                        'held_avg_daily_return': held_avg_return,
+                        'fraud_pattern': 'LAYERED_FUND_STRUCTURE',
+                        'severity': 'HIGH' if holder_avg_return > 2 else 'MEDIUM',
+                        'banco_master_similarity': 'MEDIUM'
+                    })
 
         result_df = pd.DataFrame(layered_structures)
 
         if not result_df.empty:
-            print(f"🚨 {len(result_df)} estruturas em camadas detectadas!")
+            logger.warning(f"{len(result_df)} estruturas em camadas detectadas!")
         else:
-            print("✅ Nenhuma estrutura em camadas detectada")
+            logger.info("Nenhuma estrutura em camadas detectada")
 
         return result_df
 
@@ -186,7 +196,7 @@ class FraudSchemeDetector:
         - Performance muito acima do mercado
         - Crescimento de PL incompatível com fluxos
         """
-        print("🔍 Detectando inflação de ativos...")
+        logger.info("Detectando inflacao de ativos...")
 
         inflation_cases = []
 
@@ -200,11 +210,10 @@ class FraudSchemeDetector:
 
             total_value = portfolio['VL_MERCADO'].sum()
 
-            # Calcular % em ativos ilíquidos
+            # Calcular % em ativos ilíquidos using vectorized regex (much faster than lambda)
             illiquid_types = ['CRI', 'CRA', 'DEBENTURE', 'CDB']
-            illiquid_mask = portfolio['CD_ATIVO'].apply(
-                lambda x: any(t in str(x).upper() for t in illiquid_types)
-            )
+            illiquid_pattern = '|'.join(illiquid_types)
+            illiquid_mask = portfolio['CD_ATIVO'].str.contains(illiquid_pattern, case=False, na=False, regex=True)
             illiquid_value = portfolio[illiquid_mask]['VL_MERCADO'].sum()
             illiquid_pct = (illiquid_value / total_value * 100) if total_value > 0 else 0
 
@@ -238,9 +247,9 @@ class FraudSchemeDetector:
         result_df = pd.DataFrame(inflation_cases)
 
         if not result_df.empty:
-            print(f"🚨 {len(result_df)} casos de inflação de ativos detectados!")
+            logger.warning(f"{len(result_df)} casos de inflacao de ativos detectados!")
         else:
-            print("✅ Nenhuma inflação de ativos detectada")
+            logger.info("Nenhuma inflacao de ativos detectada")
 
         return result_df
 
@@ -260,10 +269,10 @@ class FraudSchemeDetector:
         - Mesmo padrão de naming (LTDA ME, EIRELI)
         - Concentração de emissores em fundos do mesmo administrador
         """
-        print("🔍 Detectando redes de empresas de fachada...")
+        logger.info("Detectando redes de empresas de fachada...")
 
         if 'EMISSOR' not in cda_df.columns:
-            print("⚠️  Coluna EMISSOR não encontrada")
+            logger.warning("Coluna EMISSOR nao encontrada")
             return pd.DataFrame()
 
         shell_networks = []
@@ -310,9 +319,9 @@ class FraudSchemeDetector:
         result_df = pd.DataFrame(shell_networks)
 
         if not result_df.empty:
-            print(f"🚨 {len(result_df)} redes de empresas de fachada detectadas!")
+            logger.warning(f"{len(result_df)} redes de empresas de fachada detectadas!")
         else:
-            print("✅ Nenhuma rede de shells detectada")
+            logger.info("Nenhuma rede de shells detectada")
 
         return result_df
 
@@ -329,9 +338,9 @@ class FraudSchemeDetector:
         3. Inflação de ativos
         4. Rede de shells
         """
-        print("\n" + "="*70)
-        print("🚨 DETECÇÃO DE ESQUEMAS DE FRAUDE - PADRÃO BANCO MASTER")
-        print("="*70)
+        logger.info("=" * 70)
+        logger.info("DETECCAO DE ESQUEMAS DE FRAUDE - PADRAO BANCO MASTER")
+        logger.info("=" * 70)
 
         # Executar todas as análises
         circular = self.detect_circular_flow(informe_df, cda_df, cadastro_df)
@@ -346,39 +355,39 @@ class FraudSchemeDetector:
 
             if not circular.empty:
                 circular.to_csv(output_path / 'circular_flow.csv', index=False)
-                print(f"💾 Circular flow: {output_path / 'circular_flow.csv'}")
+                logger.info(f"Circular flow saved: {output_path / 'circular_flow.csv'}")
 
             if not layered.empty:
                 layered.to_csv(output_path / 'layered_funds.csv', index=False)
-                print(f"💾 Layered funds: {output_path / 'layered_funds.csv'}")
+                logger.info(f"Layered funds saved: {output_path / 'layered_funds.csv'}")
 
             if not inflation.empty:
                 inflation.to_csv(output_path / 'asset_inflation.csv', index=False)
-                print(f"💾 Asset inflation: {output_path / 'asset_inflation.csv'}")
+                logger.info(f"Asset inflation saved: {output_path / 'asset_inflation.csv'}")
 
             if not shells.empty:
                 shells.to_csv(output_path / 'shell_networks.csv', index=False)
-                print(f"💾 Shell networks: {output_path / 'shell_networks.csv'}")
+                logger.info(f"Shell networks saved: {output_path / 'shell_networks.csv'}")
 
         # Resumo
-        print("\n" + "="*70)
-        print("📊 RESUMO DE ESQUEMAS DETECTADOS")
-        print("="*70)
+        logger.info("=" * 70)
+        logger.info("RESUMO DE ESQUEMAS DETECTADOS")
+        logger.info("=" * 70)
 
-        print(f"\n1. Fluxo Circular:          {len(circular)} casos")
-        print(f"2. Fundos em Camadas:        {len(layered)} casos")
-        print(f"3. Inflação de Ativos:       {len(inflation)} casos")
-        print(f"4. Redes de Shells:          {len(shells)} casos")
+        logger.info(f"1. Fluxo Circular:          {len(circular)} casos")
+        logger.info(f"2. Fundos em Camadas:        {len(layered)} casos")
+        logger.info(f"3. Inflacao de Ativos:       {len(inflation)} casos")
+        logger.info(f"4. Redes de Shells:          {len(shells)} casos")
 
         total_schemes = len(circular) + len(layered) + len(inflation) + len(shells)
-        print(f"\n🚨 TOTAL DE ESQUEMAS:        {total_schemes}")
+        logger.warning(f"TOTAL DE ESQUEMAS:        {total_schemes}")
 
         if total_schemes > 0:
-            print("\n⚠️  PADRÃO BANCO MASTER DETECTADO!")
-            print("    Múltiplos esquemas indicam fraude sistêmica.")
-            print("    Recomenda-se investigação imediata.")
+            logger.warning("PADRAO BANCO MASTER DETECTADO!")
+            logger.warning("    Multiplos esquemas indicam fraude sistemica.")
+            logger.warning("    Recomenda-se investigacao imediata.")
         else:
-            print("\n✅ Nenhum esquema de fraude óbvio detectado")
+            logger.info("Nenhum esquema de fraude obvio detectado")
 
         return {
             'circular_flow': circular,

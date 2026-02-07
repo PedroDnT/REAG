@@ -1,25 +1,26 @@
 """
-Fraud Detection Analyzers
+Fraud Detection Analyzers.
 
 Main analyzers for detecting various types of fraud patterns in investment funds.
 """
 
 from .anomaly_detector import AnomalyDetector
+from .benford_law import BenfordLawAnalyzer
+from .concentration import ConcentrationAnalyzer
 from .enhanced_phantom_assets import EnhancedPhantomAssetDetector
 from .fraud_schemes import FraudSchemeDetector
-from .peer_comparison import PeerComparisonAnalyzer
-from .concentration import ConcentrationAnalyzer
 from .market_data import MarketDataValidator
+from .peer_comparison import PeerComparisonAnalyzer
 
 __all__ = [
-    'AnomalyDetector',
-    'EnhancedPhantomAssetDetector',
-    'FraudSchemeDetector',
-    'PeerComparisonAnalyzer',
-    'ConcentrationAnalyzer',
-    'MarketDataValidator',
+    "AnomalyDetector",
+    "BenfordLawAnalyzer",
+    "ConcentrationAnalyzer",
+    "EnhancedPhantomAssetDetector",
+    "FraudSchemeDetector",
+    "MarketDataValidator",
+    "PeerComparisonAnalyzer",
 ]
 
-# Deprecated - Use EnhancedPhantomAssetDetector instead
-# PhantomAssetDetector has been removed in favor of the enhanced version
-# that properly distinguishes between public and private assets
+# NOTE: PhantomAssetDetector (basic) has been removed in favor of the enhanced
+# version that properly distinguishes between public and private assets.

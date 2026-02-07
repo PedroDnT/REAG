@@ -18,13 +18,13 @@ class Config:
     REPORTS_DIR = BASE_DIR / "reports"
 
     # Configurações de análise
-    ANOMALY_Z_SCORE_THRESHOLD = 3.0
+    ANOMALY_Z_SCORE_THRESHOLD = 2.5
     FLOW_WINDOW_DAYS = 10
 
     # Período de análise padrão (com dados disponíveis)
     DEFAULT_START_YEAR = 2024
     DEFAULT_START_MONTH = 1
-    DEFAULT_END_YEAR = 2024
+    DEFAULT_END_YEAR = 2025
     DEFAULT_END_MONTH = 12  # Ajustar conforme disponibilidade
 
     # Disponibilidade conhecida de dados

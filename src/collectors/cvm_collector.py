@@ -1,3 +1,5 @@
+import logging
+
 import requests
 import pandas as pd
 from pathlib import Path
@@ -7,6 +9,8 @@ from tqdm import tqdm
 import zipfile
 import time
 from config.settings import Config
+
+logger = logging.getLogger(__name__)
 
 
 class CVMCollector:
@@ -35,7 +39,7 @@ class CVMCollector:
             response = requests.head(url, timeout=10, allow_redirects=True)
             return response.status_code == 200
         except Exception as e:
-            print(f"Erro ao verificar {url}: {e}")
+            logger.error(f"Erro ao verificar {url}: {e}")
             return False
 
     def get_available_months(self, data_type: str = 'informe_diario',
@@ -52,6 +56,9 @@ class CVMCollector:
         Returns:
             Lista de tuplas (year, month) disponíveis
         """
+        if start_year > end_year:
+            raise ValueError(f"start_year ({start_year}) must be <= end_year ({end_year})")
+
         available = []
         current_date = datetime.now()
 
@@ -115,26 +122,26 @@ class CVMCollector:
             except requests.exceptions.HTTPError as e:
                 # Erros 4xx (cliente) não devem ter retry
                 if 400 <= e.response.status_code < 500:
-                    print(f"Erro HTTP {e.response.status_code}: {url}")
+                    logger.error(f"Erro HTTP {e.response.status_code}: {url}")
                     return False
 
                 # Erros 5xx (servidor) podem ter retry
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s
-                    print(f"Erro no download (tentativa {attempt + 1}/{max_retries}). "
-                          f"Aguardando {wait_time}s...")
+                    logger.warning(f"Erro no download (tentativa {attempt + 1}/{max_retries}). "
+                                 f"Aguardando {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    print(f"Falha após {max_retries} tentativas: {url}")
+                    logger.error(f"Falha apos {max_retries} tentativas: {url}")
                     return False
 
             except Exception as e:
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
-                    print(f"Erro: {e}. Tentando novamente em {wait_time}s...")
+                    logger.warning(f"Erro: {e}. Tentando novamente em {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    print(f"Erro ao baixar {url}: {e}")
+                    logger.error(f"Erro ao baixar {url}: {e}")
                     return False
 
         return False
@@ -151,7 +158,7 @@ class CVMCollector:
                 csv_files = [f for f in file_list if f.endswith('.csv')]
 
                 if not csv_files:
-                    print(f"Nenhum arquivo CSV encontrado em {zip_path}")
+                    logger.warning(f"Nenhum arquivo CSV encontrado em {zip_path}")
                     return None
 
                 # Extrai o CSV (assume que há apenas um CSV por ZIP)
@@ -159,11 +166,11 @@ class CVMCollector:
                 zip_ref.extract(csv_filename, extract_to)
 
                 extracted_path = extract_to / csv_filename
-                print(f"Extraído: {extracted_path}")
+                logger.info(f"Extraido: {extracted_path}")
                 return extracted_path
 
         except Exception as e:
-            print(f"Erro ao extrair {zip_path}: {e}")
+            logger.error(f"Erro ao extrair {zip_path}: {e}")
             return None
 
     def download_informe_diario(self, year: int, month: int) -> Optional[Path]:
@@ -174,7 +181,7 @@ class CVMCollector:
 
         # Verifica se CSV já existe
         if csv_path.exists():
-            print(f"Arquivo já existe: {csv_path}")
+            logger.info(f"Arquivo ja existe: {csv_path}")
             return csv_path
 
         # Download do ZIP
@@ -203,7 +210,7 @@ class CVMCollector:
 
         # Verifica se CSV já existe
         if csv_path.exists():
-            print(f"Arquivo já existe: {csv_path}")
+            logger.info(f"Arquivo ja existe: {csv_path}")
             return csv_path
 
         # Download do ZIP
@@ -244,7 +251,7 @@ class CVMCollector:
         output_path = self.config.RAW_DATA_DIR / filename
 
         if output_path.exists():
-            print(f"Arquivo já existe: {output_path}")
+            logger.info(f"Arquivo ja existe: {output_path}")
             return output_path
 
         success = self.download_file(url, output_path)
@@ -271,11 +278,17 @@ class CVMCollector:
             data_types: Tipos de dados para baixar
             check_availability: Se True, verifica disponibilidade antes de baixar
         """
+        if start_year > end_year or (start_year == end_year and start_month > end_month):
+            raise ValueError(
+                f"Start ({start_year}-{start_month:02d}) must be before "
+                f"end ({end_year}-{end_month:02d})"
+            )
+
         results = []
 
         # Baixar Cadastro (arquivo único, não mensal)
         if 'cadastro' in data_types:
-            print("\n=== Baixando Cadastro (arquivo único) ===")
+            logger.info("=== Baixando Cadastro (arquivo unico) ===")
             path = self.download_cadastro(use_current=True)
             if path:
                 results.append(('cadastro', None, None, path))
@@ -285,13 +298,13 @@ class CVMCollector:
         current_month = start_month
 
         while (current_year < end_year) or (current_year == end_year and current_month <= end_month):
-            print(f"\n=== Baixando dados de {current_year}-{current_month:02d} ===")
+            logger.info(f"=== Baixando dados de {current_year}-{current_month:02d} ===")
 
             if 'informe_diario' in data_types:
                 # Verificar disponibilidade
                 url = self.get_informe_diario_url(current_year, current_month)
                 if check_availability and not self.check_file_exists(url):
-                    print(f"⚠️  Arquivo não disponível: inf_diario_fi_{current_year}{current_month:02d}.zip")
+                    logger.warning(f"Arquivo nao disponivel: inf_diario_fi_{current_year}{current_month:02d}.zip")
                 else:
                     path = self.download_informe_diario(current_year, current_month)
                     if path:
@@ -302,13 +315,13 @@ class CVMCollector:
                 if current_year >= 2023:
                     url = self.get_cda_url(current_year, current_month)
                     if check_availability and not self.check_file_exists(url):
-                        print(f"⚠️  Arquivo não disponível: cda_fi_{current_year}{current_month:02d}.zip")
+                        logger.warning(f"Arquivo nao disponivel: cda_fi_{current_year}{current_month:02d}.zip")
                     else:
                         path = self.download_cda(current_year, current_month)
                         if path:
                             results.append(('cda', current_year, current_month, path))
                 else:
-                    print(f"⚠️  CDA não disponível antes de 2023 (atual: {current_year}-{current_month:02d})")
+                    logger.warning(f"CDA nao disponivel antes de 2023 (atual: {current_year}-{current_month:02d})")
 
             current_month += 1
             if current_month > 12:

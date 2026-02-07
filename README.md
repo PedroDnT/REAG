@@ -14,8 +14,10 @@ Identificar irregularidades e padrões suspeitos nos fundos administrados pela R
 ## 📊 Fontes de Dados
 
 - **CVM Dados Abertos**: Informe Diário, CDA, Cadastro
-- **Período**: Configurável (padrão: 2024)
-- **Atualização**: Mensal pela CVM
+- **Formato**: ZIP comprimido (desde maio/2022)
+- **Período**: Últimos 12 meses disponíveis no portal
+- **Atualização**: Diária (meses corrente e anterior), semanal (demais meses)
+- **Histórico**: Dados anteriores a 12 meses devem ser baixados do arquivo histórico
 
 ## 🚀 Instalação
 
@@ -80,6 +82,39 @@ Identifica padrões suspeitos:
 - Runs de resgates consecutivos (5+ dias)
 - Divergências fluxo vs. performance
 
+### 5. Geração de Relatório Público
+
+```bash
+# Gerar relatório em Markdown
+python scripts/generate_public_report.py --format markdown
+
+# Gerar relatório em HTML
+python scripts/generate_public_report.py --format html
+
+# Gerar relatório em JSON
+python scripts/generate_public_report.py --format json
+
+# Especificar arquivo de saída
+python scripts/generate_public_report.py --format html --output meu_relatorio.html
+```
+
+Gera um relatório público agregando todas as anomalias detectadas:
+- Sumário executivo com estatísticas
+- Distribuição de severidade das anomalias
+- Detalhamento de achados (anonimizado)
+- Metodologia e disclaimer
+
+### 6. Automação de fluxo com Playwright
+
+Para automatizar um fluxo de navegador com Playwright, configure as variáveis de
+ambiente e execute:
+
+```bash
+python scripts/playwright_workflow.py
+```
+
+Consulte `docs/playwright_workflow.md` para os detalhes de configuração.
+
 ## 📁 Estrutura do Projeto
 
 ```
@@ -95,6 +130,8 @@ REAG/
 │   ├── 02_identify_reag_funds.ipynb
 │   ├── 03_flow_analysis.ipynb
 │   └── 04_anomaly_detection.ipynb
+├── scripts/              # Scripts utilitários
+│   └── generate_public_report.py
 ├── data/
 │   ├── raw/             # Dados brutos da CVM
 │   └── processed/       # Dados processados
@@ -129,6 +166,21 @@ REAG/
 - **Método**: Correlação negativa entre Z-scores
 - **Detecta**: Entradas em dias de performance ruim (ou vice-versa)
 
+### 5. 🆕 Benford's Law Analysis
+
+- **Método**: Análise de distribuição de primeiro dígito
+- **Threshold**: MAD > 0.015 ou p-value < 0.05
+- **Detecta**: Números fabricados/manipulados
+- **Sucesso**: Usado em casos Enron, Madoff
+- **Guia completo**: Ver `BENFORD_LAW_USAGE_GUIDE.md`
+
+### 6. 🆕 Benchmark de Métodos
+
+Para comparação detalhada de todos os métodos de detecção:
+- **Documento**: `FRAUD_INVESTIGATION_BENCHMARK.md`
+- **Compara**: Precisão, Recall, Velocidade de cada método
+- **Recomenda**: Métodos adicionais (ML, Network Analysis)
+
 ## 📈 Outputs
 
 ### Dados Processados
@@ -143,6 +195,7 @@ REAG/
 - `reports/quedas_pl.csv`: Quedas bruscas de PL
 - `reports/runs_resgate.csv`: Runs detectadas
 - `reports/divergencias_flow_performance.csv`: Divergências
+- `reports/public_report.[md|html|json]`: Relatório público agregado
 
 ## 🧪 Testes
 
