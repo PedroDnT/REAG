@@ -5,15 +5,38 @@ import numpy as np
 from scipy import stats
 from typing import Optional, Tuple
 from config.settings import Config
+from config.constants import (
+    PL_DROP_CRITICAL,
+    REDEMPTION_RUN_DAYS,
+    ZSCORE_WARNING,
+)
+from src.analyzers.base import BaseAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
-class AnomalyDetector:
+class AnomalyDetector(BaseAnalyzer):
     """Detector de anomalias em dados de fundos"""
 
     def __init__(self, config: Optional[Config] = None):
+        super().__init__(config=config)
         self.config = config or Config()
+
+    def analyze(self, df: pd.DataFrame, cda_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        Perform anomaly analysis on fund data.
+
+        Args:
+            df: Informe diário DataFrame
+            cda_df: Optional CDA DataFrame
+
+        Returns:
+            DataFrame with flow anomalies (primary anomaly type)
+        """
+        return self.detect_flow_anomalies(
+            df,
+            threshold=self.config.ANOMALY_Z_SCORE_THRESHOLD
+        )
 
     def calculate_z_scores(self, series: pd.Series) -> pd.Series:
         """Calcula Z-scores para uma série"""
@@ -50,7 +73,7 @@ class AnomalyDetector:
         return anomalies.sort_values('Z_SCORE_FLOW', key=abs, ascending=False)
 
     def detect_pl_drops(self, df: pd.DataFrame,
-                       threshold_pct: float = 20.0,
+                       threshold_pct: float = PL_DROP_CRITICAL,
                        pl_col: str = 'VL_PATRIM_LIQ') -> pd.DataFrame:
         """
         Detecta quedas bruscas de patrimônio líquido
@@ -74,7 +97,7 @@ class AnomalyDetector:
         return drops.sort_values('PL_VAR_PCT')
 
     def detect_runs(self, df: pd.DataFrame,
-                   consecutive_days: int = 5,
+                   consecutive_days: int = REDEMPTION_RUN_DAYS,
                    flow_col: str = 'FLUXO_LIQ_DIA') -> pd.DataFrame:
         """
         Detecta "runs" - sequências consecutivas de resgates líquidos
@@ -127,7 +150,7 @@ class AnomalyDetector:
         return high_concentration.sort_values('PCT_CARTEIRA', ascending=False)
 
     def detect_divergence_flow_performance(self, df: pd.DataFrame,
-                                          threshold_z: float = 2.0) -> pd.DataFrame:
+                                          threshold_z: float = ZSCORE_WARNING) -> pd.DataFrame:
         """
         Detecta divergência entre fluxo e performance
 
