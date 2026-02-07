@@ -172,6 +172,6 @@ class CacheManager:
             'cache_dir': str(self.cache_dir),
             'num_files': len(cache_files),
             'total_size_mb': total_size / 1024 / 1024,
-            'oldest_file': min((f.stat().st_mtime for f in cache_files), default=None),
-            'newest_file': max((f.stat().st_mtime for f in cache_files), default=None)
+            'oldest_file': min((f.stat().st_mtime for f in cache_files if f.is_file()), default=None),
+            'newest_file': max((f.stat().st_mtime for f in cache_files if f.is_file()), default=None)
         }
