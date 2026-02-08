@@ -12,6 +12,14 @@ import numpy as np
 from typing import Dict, List, Optional
 from pathlib import Path
 from scipy import stats
+from config.constants import (
+    MIN_OBSERVATIONS,
+    PONZI_LOW_VOLATILITY_PCT,
+    PONZI_MIN_RETURN,
+    PONZI_POSITIVE_DAYS_PCT,
+    PONZI_SHARPE_THRESHOLD,
+    ZSCORE_THRESHOLD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +108,7 @@ class PeerComparisonAnalyzer:
             fund_data = informe_df[informe_df['CNPJ_FUNDO'] == cnpj]
             returns = fund_data['RETORNO_DIA'].dropna()
 
-            if len(returns) < 20:  # Mínimo de dados
+            if len(returns) < MIN_OBSERVATIONS:  # Mínimo de dados
                 continue
 
             # Calcular métricas
@@ -184,19 +192,19 @@ class PeerComparisonAnalyzer:
                 peers['sharpe_ratio']
             )
 
-            # Determinar se é outlier (|Z| > 3)
+            # Determinar se é outlier (|Z| > ZSCORE_THRESHOLD)
             is_outlier = (
-                abs(return_zscore) > 3 or
-                abs(sharpe_zscore) > 3
+                abs(return_zscore) > ZSCORE_THRESHOLD or
+                abs(sharpe_zscore) > ZSCORE_THRESHOLD
             )
 
             # Classificar tipo de anomalia
             fraud_flag = None
-            if return_zscore > 3:
+            if return_zscore > ZSCORE_THRESHOLD:
                 fraud_flag = 'RETURNS_TOO_HIGH'
-            elif return_zscore < -3:
+            elif return_zscore < -ZSCORE_THRESHOLD:
                 fraud_flag = 'HIDDEN_LOSSES'
-            elif sharpe_zscore > 3:
+            elif sharpe_zscore > ZSCORE_THRESHOLD:
                 fraud_flag = 'RISK_ADJUSTED_TOO_GOOD'
 
             comparisons.append({
@@ -303,9 +311,9 @@ class PeerComparisonAnalyzer:
 
             # Red flags
             is_suspicious = (
-                (volatility < 0.05 and avg_return > 0.01) or  # Vol muito baixa com retorno positivo
-                (positive_days_pct > 90) or  # >90% dias positivos
-                (sharpe > 5)  # Sharpe muito alto
+                (volatility < PONZI_LOW_VOLATILITY_PCT and avg_return > PONZI_MIN_RETURN) or  # Vol muito baixa com retorno positivo
+                (positive_days_pct > PONZI_POSITIVE_DAYS_PCT) or  # >90% dias positivos
+                (sharpe > PONZI_SHARPE_THRESHOLD)  # Sharpe muito alto
             )
 
             if is_suspicious:

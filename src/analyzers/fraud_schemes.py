@@ -19,6 +19,11 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
+from config.constants import (
+    ASSET_INFLATION_ILLIQUID_PCT,
+    ASSET_INFLATION_MIN_RETURN_PCT,
+    SHELL_NETWORK_MIN_COUNT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +235,7 @@ class FraudSchemeDetector:
                 pl_change = fund_performance['VL_PATRIM_LIQ'].pct_change().mean() * 100
 
                 # Red flags
-                if (illiquid_pct > 70 and avg_return > 0.5):
+                if (illiquid_pct > ASSET_INFLATION_ILLIQUID_PCT and avg_return > ASSET_INFLATION_MIN_RETURN_PCT):
                     # >70% ilíquido com retorno >0.5% ao dia = suspeito
                     inflation_cases.append({
                         'fund_cnpj': fund_cnpj,
@@ -297,7 +302,7 @@ class FraudSchemeDetector:
                 if any(pattern in str(iss).upper() for pattern in shell_patterns)
             ]
 
-            if len(suspicious_issuers) >= 5:  # Múltiplas shells = red flag
+            if len(suspicious_issuers) >= SHELL_NETWORK_MIN_COUNT:  # Múltiplas shells = red flag
                 # Calcular valor total
                 suspicious_mask = admin_portfolio['EMISSOR'].isin(suspicious_issuers)
                 suspicious_value = admin_portfolio[suspicious_mask]['VL_MERCADO'].sum()

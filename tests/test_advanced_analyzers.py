@@ -337,7 +337,7 @@ class TestMarketDataValidator:
         validator._save_cache()
         assert validator.cache_dir.exists()
 
-    @pytest.mark.skipif(True, reason="Requires internet connection")
+    @pytest.mark.integration
     def test_api_integration(self):
         from src.analyzers.market_data import MarketDataValidator
         validator = MarketDataValidator()

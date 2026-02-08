@@ -40,8 +40,11 @@ HHI_CRITICAL = 0.40  # Critical concentration
 # Sharpe ratio too good to be true threshold
 PONZI_SHARPE_THRESHOLD = 5.0
 
-# Volatility suspiciously low (< 0.5% daily)
+# Volatility suspiciously low (< 0.5% daily, expressed as decimal)
 PONZI_LOW_VOLATILITY = 0.005
+
+# Volatility suspiciously low (percentage form, for use with pct_change * 100)
+PONZI_LOW_VOLATILITY_PCT = 0.05
 
 # Percentage of positive return days indicating smoothing
 PONZI_POSITIVE_DAYS_PCT = 90.0
@@ -88,8 +91,11 @@ SHELL_NETWORK_MIN_COUNT = 5
 # Percentage of illiquid assets indicating inflation scheme
 ASSET_INFLATION_ILLIQUID_PCT = 70.0
 
-# Minimum return on inflated assets to flag
+# Minimum return on inflated assets to flag (decimal form)
 ASSET_INFLATION_MIN_RETURN = 0.005  # 0.5% daily
+
+# Minimum return on inflated assets to flag (percentage form, for use with pct_change * 100)
+ASSET_INFLATION_MIN_RETURN_PCT = 0.5  # 0.5% daily
 
 # =============================================================================
 # Data Quality
