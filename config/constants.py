@@ -160,6 +160,88 @@ BANCO_MASTER_ENTITIES = [
 ]
 
 # =============================================================================
+# Quotaholder Analysis
+# =============================================================================
+
+# Percentage drop in NR_COTST triggering alert
+QUOTAHOLDER_DROP_PCT = 30.0
+
+# Days window for quotaholder drop detection
+QUOTAHOLDER_DROP_WINDOW = 5
+
+# Z-score for per-capita AUM outlier
+PER_CAPITA_AUM_ZSCORE = 3.0
+
+# =============================================================================
+# Cost Basis Analysis
+# =============================================================================
+
+# Unrealized gain threshold (ratio: market / cost)
+COST_BASIS_GAIN_THRESHOLD = 5.0
+
+# Minimum VL_MERCADO to flag zero-cost assets
+COST_BASIS_ZERO_VALUE_MIN = 100_000
+
+# =============================================================================
+# Portfolio Reconciliation
+# =============================================================================
+
+# Gap between CDA sum and Informe PL (warning)
+RECON_GAP_WARNING = 0.10
+
+# Gap between CDA sum and Informe PL (critical)
+RECON_GAP_CRITICAL = 0.30
+
+# =============================================================================
+# Fund Lifecycle
+# =============================================================================
+
+# Days after constitution for hot start detection
+HOT_START_DAYS = 30
+
+# Minimum PL for hot start (R$50M)
+HOT_START_PL_MIN = 50_000_000
+
+# Maximum days for short-lived fund
+SHORT_LIVED_DAYS = 180
+
+# Days window for coordinated creation detection
+COORDINATED_CREATION_WINDOW = 7
+
+# =============================================================================
+# Window Dressing
+# =============================================================================
+
+# Z-score for month-end return spike detection
+MONTH_END_RETURN_ZSCORE = 2.5
+
+# PL change threshold for quarter-end inflation
+QUARTER_END_PL_THRESHOLD = 0.15
+
+# =============================================================================
+# Valuation Smoothing
+# =============================================================================
+
+# First-order autocorrelation threshold
+AUTOCORRELATION_THRESHOLD = 0.3
+
+# Consecutive zero-change days for stale pricing
+STALE_PRICE_DAYS = 5
+
+# Minimum fund/benchmark volatility ratio
+VOLATILITY_RATIO_MIN = 0.3
+
+# =============================================================================
+# Cross-Fund Issuer
+# =============================================================================
+
+# Minimum funds to flag captive issuer
+CAPTIVE_ISSUER_MIN_FUNDS = 3
+
+# Jaro-Winkler threshold for issuer name similarity clustering
+ISSUER_NAME_SIMILARITY = 0.85
+
+# =============================================================================
 # Date Ranges (CVM Data Availability)
 # =============================================================================
 

@@ -262,22 +262,173 @@ SIGNAL_REGISTRY: dict[str, SignalDefinition] = {
         ),
         severity_rule=_phantom_asset_severity,
     ),
-    "valuation_smoothing_stub": SignalDefinition(
-        finding_id="valuation_smoothing_stub",
-        title="Valuation smoothing (placeholder)",
+    "quotaholder_anomaly": SignalDefinition(
+        finding_id="quotaholder_anomaly",
+        title="Quotaholder count anomaly",
         plain_language_explanation=(
-            "This detector is reserved for a next enhancement: identifying return smoothing or stale pricing patterns "
-            "that can accompany valuation manipulation in illiquid portfolios."
+            "We detected abnormal changes in the number of quota holders (NR_COTST). "
+            "Sudden drops can indicate insider knowledge of problems, phantom participation "
+            "suggests wash trading, and per-capita AUM outliers suggest concentrated ownership."
         ),
-        evidence_fields=(),
+        evidence_fields=("CNPJ_FUNDO", "DT_COMPTC", "signal_type", "NR_COTST", "pct_change", "per_capita_aum", "severity"),
         primary_entities=("FUND",),
         next_steps=(
-            "Implement return autocorrelation and stale-pricing diagnostics once the required time series inputs are confirmed.",
+            "Identify the investors who redeemed during the mass exodus window.",
+            "Cross-reference quotaholder changes with flow data to confirm whether drops match redemption volumes.",
+            "Check if coordinated exodus across multiple funds under the same admin suggests insider information.",
         ),
         caveats=(
-            "Not computed in this phase.",
+            "Quotaholder count changes can be legitimate (e.g., fund mergers, institutional reallocations).",
+            "NR_COTST is a point-in-time snapshot and may not capture intra-day movements.",
         ),
-        severity_rule=lambda row: "LOW",
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "cost_basis_anomaly": SignalDefinition(
+        finding_id="cost_basis_anomaly",
+        title="Cost basis vs market value anomaly",
+        plain_language_explanation=(
+            "We detected positions where the reported market value diverges significantly from cost basis. "
+            "Zero-cost or negative-cost positions, or extreme unrealized gains on illiquid assets, "
+            "can indicate phantom assets, data fabrication, or valuation manipulation."
+        ),
+        evidence_fields=("CNPJ_FUNDO", "CD_ATIVO", "signal_type", "VL_MERCADO", "VL_CUSTO_POS_FINAL", "gain_ratio", "severity"),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Validate the pricing methodology for positions with extreme gain ratios.",
+            "Check if zero-cost or negative-cost entries reflect data errors or actual phantom positions.",
+            "Compare gain ratios across similar funds to identify systematic overvaluation by a single administrator.",
+        ),
+        caveats=(
+            "Some legitimate positions (e.g., received via corporate actions) may have zero cost basis.",
+            "Gain ratios can be extreme for long-held positions in volatile markets.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "portfolio_reconciliation_gap": SignalDefinition(
+        finding_id="portfolio_reconciliation_gap",
+        title="Portfolio vs PL reconciliation gap",
+        plain_language_explanation=(
+            "We detected a significant discrepancy between the sum of portfolio positions (CDA) and the "
+            "reported net asset value (Informe Diario PL). Gaps can indicate hidden positions, "
+            "off-book assets, or reporting inconsistencies."
+        ),
+        evidence_fields=("CNPJ_FUNDO", "DT_COMPTC", "cda_total", "informe_pl", "gap_pct", "signal_type", "severity"),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Request the fund's full position report and reconcile against CDA filings.",
+            "Check if the gap is explained by derivatives, receivables, or other off-balance items.",
+            "Verify whether the administrator filed CDA data on time and completely.",
+        ),
+        caveats=(
+            "CDA and Informe may have different reporting dates; minor gaps can be timing-related.",
+            "Derivative positions and cash balances may not be fully reflected in CDA.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "fund_lifecycle_anomaly": SignalDefinition(
+        finding_id="fund_lifecycle_anomaly",
+        title="Fund lifecycle anomaly",
+        plain_language_explanation=(
+            "We detected unusual patterns in fund creation or cancellation. Hot starts (rapid AUM growth), "
+            "short-lived funds, coordinated creation, or suspicious inflow timing can indicate "
+            "pump-and-dump schemes or pre-arranged investment structures."
+        ),
+        evidence_fields=("CNPJ_FUNDO", "signal_type", "DT_CONST", "DT_CANCEL", "days_active", "max_pl", "severity"),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Check the fund prospectus for pre-arranged subscription commitments.",
+            "Identify the initial investors and verify their relationship to the administrator or manager.",
+            "For short-lived funds, trace the final disposition of assets and redemption destinations.",
+        ),
+        caveats=(
+            "Some funds are legitimately created for specific short-term purposes (e.g., structured products).",
+            "Hot starts can be normal for funds seeded by institutional investors.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "manager_network_anomaly": SignalDefinition(
+        finding_id="manager_network_anomaly",
+        title="Manager network anomaly",
+        plain_language_explanation=(
+            "We detected unusual patterns in fund manager relationships. A single manager operating "
+            "across multiple administrators, holding overlapping illiquid assets, or appearing as an "
+            "issuer in their own funds can indicate coordinated manipulation."
+        ),
+        evidence_fields=("CNPJ_GESTOR", "signal_type", "num_admins", "num_funds", "total_aum", "overlap_assets", "severity"),
+        primary_entities=("MANAGER",),
+        next_steps=(
+            "Map the full network of funds, administrators, and issuers connected to the flagged manager.",
+            "Check if overlapping illiquid assets are priced consistently across different funds.",
+            "Verify whether the manager's registered activities match the scale of assets under management.",
+        ),
+        caveats=(
+            "Large asset managers legitimately operate across multiple administrators.",
+            "Asset overlap can occur in index-tracking or sector-focused strategies.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "window_dressing": SignalDefinition(
+        finding_id="window_dressing",
+        title="Window dressing pattern",
+        plain_language_explanation=(
+            "We detected temporal manipulation patterns around reporting dates. Month-end return spikes, "
+            "quarter-end PL inflation, or flow reversal patterns (large inflows before month-end "
+            "followed by outflows after) suggest deliberate performance or AUM window dressing."
+        ),
+        evidence_fields=("CNPJ_FUNDO", "signal_type", "period", "metric_value", "baseline_value", "deviation_pct", "severity"),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Compare month-end vs mid-month pricing sources for the fund's key holdings.",
+            "Check if flow reversals correspond to specific distributors or investor categories.",
+            "Verify whether quarter-end PL spikes are explained by legitimate corporate actions or dividends.",
+        ),
+        caveats=(
+            "Some month-end effects are market-wide (e.g., rebalancing flows) and not fund-specific.",
+            "Quarter-end reporting deadlines can cause legitimate timing differences.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "valuation_smoothing": SignalDefinition(
+        finding_id="valuation_smoothing",
+        title="Valuation smoothing detected",
+        plain_language_explanation=(
+            "We detected statistical patterns consistent with return smoothing or stale pricing. "
+            "High return autocorrelation, extended periods of zero price change, or suspiciously "
+            "low volatility can indicate that a fund's NAV is not reflecting true market values."
+        ),
+        evidence_fields=("CNPJ_FUNDO", "signal_type", "autocorrelation", "stale_days", "vol_ratio", "severity"),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Request the fund's valuation methodology and pricing sources for illiquid positions.",
+            "Check if the fund's returns are consistent with its stated asset class and strategy.",
+            "Compare the fund's volatility profile with peer funds holding similar assets.",
+        ),
+        caveats=(
+            "Some asset classes (e.g., real estate, private credit) legitimately have low daily volatility.",
+            "Autocorrelation can be caused by illiquid markets rather than deliberate smoothing.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "cross_fund_issuer": SignalDefinition(
+        finding_id="cross_fund_issuer",
+        title="Cross-fund issuer concentration",
+        plain_language_explanation=(
+            "We detected issuer-level patterns that suggest related-party exposure or captive issuers. "
+            "Issuers appearing exclusively in one administrator's funds, near-identical issuer names, "
+            "or heavy concentration in a single issuer across multiple funds can indicate manufactured assets."
+        ),
+        evidence_fields=("EMISSOR", "signal_type", "num_funds", "num_admins", "total_exposure", "captive_admin", "severity"),
+        primary_entities=("ADMINISTRATOR",),
+        next_steps=(
+            "Verify each captive issuer's corporate registry, governance structure, and economic activity.",
+            "Check if near-identical issuer names share beneficial ownership or directors.",
+            "Request independent valuation reports for concentrated issuer exposures.",
+        ),
+        caveats=(
+            "Some issuers legitimately serve a single administrator (e.g., proprietary structured products).",
+            "Name similarity may be coincidental for common corporate naming conventions.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
     ),
     "distributor_concentration_stub": SignalDefinition(
         finding_id="distributor_concentration_stub",
