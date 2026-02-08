@@ -12,8 +12,16 @@ import pandas as pd
 
 from config.settings import Config
 from src.analyzers.anomaly_detector import AnomalyDetector
+from src.analyzers.cost_basis_analyzer import CostBasisAnalyzer
+from src.analyzers.cross_fund_issuer import CrossFundIssuerAnalyzer
 from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
 from src.analyzers.fraud_schemes import FraudSchemeDetector
+from src.analyzers.fund_lifecycle import FundLifecycleAnalyzer
+from src.analyzers.manager_network import ManagerNetworkAnalyzer
+from src.analyzers.portfolio_reconciliation import PortfolioReconciliationAnalyzer
+from src.analyzers.quotaholder_analyzer import QuotaholderAnalyzer
+from src.analyzers.valuation_smoothing import ValuationSmoothingAnalyzer
+from src.analyzers.window_dressing import WindowDressingDetector
 from src.enrichment.context_writer import build_context_section
 from src.enrichment.exa_provider import ExaProvider
 from src.enrichment.interfaces import SearchResult
@@ -99,6 +107,95 @@ def main() -> int:
         phantom_by_fund = _phantom_assets_by_fund(cda_df=cda, phantom_assets=phantom_assets)
         results["phantom_assets_by_fund"] = phantom_by_fund
         sources["phantom_assets_by_fund"] = _save_finding(phantom_by_fund, findings_dir / "phantom_assets_by_fund.csv")
+
+    # --- New analyzers ---
+
+    # Quotaholder analysis (needs informe with NR_COTST)
+    if loaded.informe is not None and not loaded.informe.empty and "NR_COTST" in loaded.informe.columns:
+        try:
+            quotaholder = QuotaholderAnalyzer(config=config)
+            qh_results = quotaholder.analyze(loaded.informe, cadastro_df=loaded.cadastro)
+            results["quotaholder_anomalies"] = qh_results
+            sources["quotaholder_anomalies"] = _save_finding(qh_results, findings_dir / "quotaholder_anomalies.csv")
+        except Exception:
+            pass
+
+    # Cost basis analysis (needs cda with VL_CUSTO_POS_FINAL)
+    if loaded.cda is not None and not loaded.cda.empty and "VL_CUSTO_POS_FINAL" in loaded.cda.columns:
+        try:
+            cda = _normalize_cda_columns(loaded.cda)
+            cost_basis = CostBasisAnalyzer(config=config)
+            cb_results = cost_basis.analyze(cda)
+            results["cost_basis_anomalies"] = cb_results
+            sources["cost_basis_anomalies"] = _save_finding(cb_results, findings_dir / "cost_basis_anomalies.csv")
+        except Exception:
+            pass
+
+    # Portfolio reconciliation (needs cda + informe)
+    if loaded.cda is not None and not loaded.cda.empty and loaded.informe is not None and not loaded.informe.empty:
+        try:
+            cda = _normalize_cda_columns(loaded.cda)
+            recon = PortfolioReconciliationAnalyzer(config=config)
+            recon_results = recon.analyze(cda, loaded.informe)
+            results["reconciliation_gaps"] = recon_results
+            sources["reconciliation_gaps"] = _save_finding(recon_results, findings_dir / "reconciliation_gaps.csv")
+        except Exception:
+            pass
+
+    # Fund lifecycle analysis (needs cadastro)
+    if loaded.cadastro is not None and not loaded.cadastro.empty and "DT_CONST" in loaded.cadastro.columns:
+        try:
+            lifecycle = FundLifecycleAnalyzer(config=config)
+            lc_results = lifecycle.analyze(loaded.cadastro, informe_df=loaded.informe)
+            results["lifecycle_anomalies"] = lc_results
+            sources["lifecycle_anomalies"] = _save_finding(lc_results, findings_dir / "lifecycle_anomalies.csv")
+        except Exception:
+            pass
+
+    # Manager network analysis (needs cadastro with CNPJ_GESTOR)
+    if loaded.cadastro is not None and not loaded.cadastro.empty and "CNPJ_GESTOR" in loaded.cadastro.columns:
+        try:
+            manager_net = ManagerNetworkAnalyzer(config=config)
+            mn_results = manager_net.analyze(
+                loaded.cadastro,
+                cda_df=_normalize_cda_columns(loaded.cda) if loaded.cda is not None and not loaded.cda.empty else None,
+                informe_df=loaded.informe,
+            )
+            results["manager_network_anomalies"] = mn_results
+            sources["manager_network_anomalies"] = _save_finding(mn_results, findings_dir / "manager_network_anomalies.csv")
+        except Exception:
+            pass
+
+    # Window dressing (needs informe with VL_QUOTA)
+    if loaded.informe is not None and not loaded.informe.empty and "VL_QUOTA" in loaded.informe.columns:
+        try:
+            wd = WindowDressingDetector(config=config)
+            wd_results = wd.analyze(loaded.informe)
+            results["window_dressing"] = wd_results
+            sources["window_dressing"] = _save_finding(wd_results, findings_dir / "window_dressing.csv")
+        except Exception:
+            pass
+
+    # Valuation smoothing (needs informe with VL_QUOTA)
+    if loaded.informe is not None and not loaded.informe.empty and "VL_QUOTA" in loaded.informe.columns:
+        try:
+            vs = ValuationSmoothingAnalyzer(config=config)
+            vs_results = vs.analyze(loaded.informe)
+            results["valuation_smoothing"] = vs_results
+            sources["valuation_smoothing"] = _save_finding(vs_results, findings_dir / "valuation_smoothing.csv")
+        except Exception:
+            pass
+
+    # Cross-fund issuer analysis (needs cda + cadastro)
+    if loaded.cda is not None and not loaded.cda.empty and loaded.cadastro is not None and not loaded.cadastro.empty:
+        try:
+            cda = _normalize_cda_columns(loaded.cda)
+            cfi = CrossFundIssuerAnalyzer(config=config)
+            cfi_results = cfi.analyze(cda, loaded.cadastro)
+            results["cross_fund_issuer"] = cfi_results
+            sources["cross_fund_issuer"] = _save_finding(cfi_results, findings_dir / "cross_fund_issuer.csv")
+        except Exception:
+            pass
 
     _write_run_metadata(
         output_dir=output_dir,

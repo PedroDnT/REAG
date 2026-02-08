@@ -456,6 +456,121 @@ class Explainer:
                     ),
                 )
 
+        # --- New analyzers: fund-level signals ---
+        for key, finding_id, cnpj_col, metric_col in (
+            ("quotaholder_anomalies", "quotaholder_anomaly", "CNPJ_FUNDO", "pct_change"),
+            ("cost_basis_anomalies", "cost_basis_anomaly", "CNPJ_FUNDO", "gain_ratio"),
+            ("reconciliation_gaps", "portfolio_reconciliation_gap", "CNPJ_FUNDO", "gap_pct"),
+            ("lifecycle_anomalies", "fund_lifecycle_anomaly", "CNPJ_FUNDO", "max_pl"),
+            ("window_dressing", "window_dressing", "CNPJ_FUNDO", "deviation_pct"),
+            ("valuation_smoothing", "valuation_smoothing", "CNPJ_FUNDO", "autocorrelation"),
+        ):
+            df = results.get(key)
+            if df is None or df.empty:
+                continue
+            definition = SIGNAL_REGISTRY.get(finding_id)
+            if not definition:
+                continue
+            source_ref = sources.get(key, "")
+            for row in df.to_dict(orient="records"):
+                fund_digits = _normalize_cnpj_digits(row.get(cnpj_col))
+                if not fund_digits:
+                    continue
+                entity_id = f"FUND_{fund_digits}"
+                entity_catalog.setdefault(
+                    entity_id,
+                    Entity(entity_id=entity_id, entity_type="FUND", cnpj_digits=fund_digits, name=None, relationships=()),
+                )
+                severity = definition.severity_rule(row)
+                metric_val = row.get(metric_col)
+                metric = f"{metric_col}: {metric_val}"
+                date = row.get("DT_COMPTC")
+                add(
+                    entity_id,
+                    EvidenceItem(
+                        finding_id=finding_id,
+                        title=definition.title,
+                        severity=severity,
+                        metric=metric,
+                        time_window=_format_time_window(date, date),
+                        counterparties="",
+                        source_ref=source_ref,
+                        record=_filter_record(row, definition),
+                    ),
+                )
+
+        # --- New analyzers: manager network signals ---
+        df = results.get("manager_network_anomalies")
+        if df is not None and not df.empty:
+            finding_id = "manager_network_anomaly"
+            definition = SIGNAL_REGISTRY.get(finding_id)
+            if definition:
+                source_ref = sources.get("manager_network_anomalies", "")
+                for row in df.to_dict(orient="records"):
+                    gestor_digits = _normalize_cnpj_digits(row.get("CNPJ_GESTOR"))
+                    if not gestor_digits:
+                        continue
+                    entity_id = f"MANAGER_{gestor_digits}"
+                    entity_catalog.setdefault(
+                        entity_id,
+                        Entity(entity_id=entity_id, entity_type="MANAGER", cnpj_digits=gestor_digits, name=None, relationships=()),
+                    )
+                    severity = definition.severity_rule(row)
+                    metric = f"num_admins: {row.get('num_admins')}, num_funds: {row.get('num_funds')}"
+                    add(
+                        entity_id,
+                        EvidenceItem(
+                            finding_id=finding_id,
+                            title=definition.title,
+                            severity=severity,
+                            metric=metric,
+                            time_window="",
+                            counterparties="",
+                            source_ref=source_ref,
+                            record=_filter_record(row, definition),
+                        ),
+                    )
+
+        # --- New analyzers: cross-fund issuer signals ---
+        df = results.get("cross_fund_issuer")
+        if df is not None and not df.empty:
+            finding_id = "cross_fund_issuer"
+            definition = SIGNAL_REGISTRY.get(finding_id)
+            if definition:
+                source_ref = sources.get("cross_fund_issuer", "")
+                for row in df.to_dict(orient="records"):
+                    admin_raw = row.get("captive_admin")
+                    admin_digits = _normalize_cnpj_digits(admin_raw)
+                    if admin_digits:
+                        entity_id = f"ADMINISTRATOR_{admin_digits}"
+                    else:
+                        entity_id = f"ISSUER_{_stable_hash(str(row.get('EMISSOR', '')))}"
+                    entity_catalog.setdefault(
+                        entity_id,
+                        Entity(
+                            entity_id=entity_id,
+                            entity_type=entity_id.split("_", 1)[0],
+                            cnpj_digits=admin_digits,
+                            name=None,
+                            relationships=(),
+                        ),
+                    )
+                    severity = definition.severity_rule(row)
+                    metric = f"total_exposure: {row.get('total_exposure')}, num_funds: {row.get('num_funds')}"
+                    add(
+                        entity_id,
+                        EvidenceItem(
+                            finding_id=finding_id,
+                            title=definition.title,
+                            severity=severity,
+                            metric=metric,
+                            time_window="",
+                            counterparties=str(row.get("EMISSOR", "")),
+                            source_ref=source_ref,
+                            record=_filter_record(row, definition),
+                        ),
+                    )
+
         # Generate charts for fund entities (best-effort) when informe_df is present.
         if informe_df is not None and not informe_df.empty:
             for entity_id, entity in entity_catalog.items():
