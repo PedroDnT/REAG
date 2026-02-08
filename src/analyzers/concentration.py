@@ -11,6 +11,10 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Set
 from pathlib import Path
+from config.constants import (
+    CONCENTRATION_LIMIT_SINGLE_ISSUER,
+    HHI_HIGH,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ class ConcentrationAnalyzer:
         """Inicializa o analisador de concentração"""
         # Limites regulatórios por categoria (simplificado)
         self.concentration_limits = {
-            'FIXED_INCOME': 0.20,  # Max 20% em um emissor
+            'FIXED_INCOME': CONCENTRATION_LIMIT_SINGLE_ISSUER,  # Max 20% em um emissor
             'MULTI_MARKET': 0.25,  # Max 25% em um emissor
             'EQUITY': 0.30,  # Max 30% em uma posição
             'DEFAULT': 0.25
@@ -184,7 +188,7 @@ class ConcentrationAnalyzer:
             # Critérios de red flag
             is_violation = (
                 metrics['violates_limit'] or  # Violação regulatória
-                metrics['hhi'] > 0.25 or  # HHI muito alto
+                metrics['hhi'] > HHI_HIGH or  # HHI muito alto
                 metrics['top5_pct'] > 75  # Top 5 > 75%
             )
 
