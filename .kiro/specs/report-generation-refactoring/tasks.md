@@ -190,7 +190,7 @@ This plan refactors the report generation system in `scripts/generate_public_rep
     - Raise IOError with descriptive message on failure
     - _Requirements: 6.4, 7.4_
 
-  - [x] 8.4 Add validation for summary statistics completeness
+  - [ ] 8.4 Add validation for summary statistics completeness
     - Check for required keys in summary dict
     - Raise KeyError with missing key name if incomplete
     - _Requirements: 7.5_

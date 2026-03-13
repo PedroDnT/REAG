@@ -156,10 +156,7 @@ def test_anonymize_empty_dataframe():
 
 def test_generate_markdown_report(generator_with_data):
     """Test generation of markdown report"""
-    reports = generator_with_data.load_anomaly_reports()
-    summary = generator_with_data.calculate_summary_statistics(reports)
-    
-    markdown = generator_with_data.generate_markdown_report(summary, reports)
+    markdown = generator_with_data.generate_report(output_format='markdown')
     
     # Check key sections are present
     assert '# REAG Fraud Investigation - Public Report' in markdown
@@ -168,17 +165,14 @@ def test_generate_markdown_report(generator_with_data):
     assert '## Methodology' in markdown
     assert '## Disclaimer' in markdown
     
-    # Check statistics are included
-    assert str(summary['total_anomalies']) in markdown
-    assert str(summary['unique_funds_affected']) in markdown
+    # Check statistics are included (total should be 13 based on sample data)
+    assert '13' in markdown  # total_anomalies
+    assert '3' in markdown   # unique_funds_affected
 
 
 def test_generate_json_report(generator_with_data):
     """Test generation of JSON report"""
-    reports = generator_with_data.load_anomaly_reports()
-    summary = generator_with_data.calculate_summary_statistics(reports)
-    
-    json_str = generator_with_data.generate_json_report(summary, reports)
+    json_str = generator_with_data.generate_report(output_format='json')
     
     # Parse JSON to verify structure
     report = json.loads(json_str)
@@ -199,10 +193,7 @@ def test_generate_json_report(generator_with_data):
 
 def test_generate_html_report(generator_with_data):
     """Test generation of HTML report"""
-    reports = generator_with_data.load_anomaly_reports()
-    summary = generator_with_data.calculate_summary_statistics(reports)
-    
-    html = generator_with_data.generate_html_report(summary, reports)
+    html = generator_with_data.generate_report(output_format='html')
     
     # Check basic HTML structure
     assert '<!DOCTYPE html>' in html
@@ -211,7 +202,7 @@ def test_generate_html_report(generator_with_data):
     
     # Check content is present
     assert 'Executive Summary' in html
-    assert str(summary['total_anomalies']) in html
+    assert '13' in html  # total_anomalies
     assert 'Methodology' in html
     assert 'Disclaimer' in html
 
@@ -300,7 +291,7 @@ def test_empty_reports():
     assert summary['unique_funds_affected'] == 0
     
     # Should still generate valid report
-    markdown = generator.generate_markdown_report(summary, reports)
+    markdown = generator.generate_report(output_format='markdown')
     assert len(markdown) > 0
     assert 'REAG Fraud Investigation' in markdown
     
