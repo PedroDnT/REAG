@@ -306,3 +306,201 @@ def test_empty_reports():
     
     # Cleanup
     shutil.rmtree(temp_dir)
+
+
+# Error Handling Tests
+
+def test_missing_csv_file_warning(temp_config, caplog):
+    """Test that missing CSV files log warnings and return empty DataFrames"""
+    import logging
+    
+    # Create generator with empty reports directory (no CSV files)
+    generator = PublicReportGenerator(config=temp_config)
+    
+    with caplog.at_level(logging.WARNING):
+        reports = generator.load_anomaly_reports()
+    
+    # All reports should be empty DataFrames
+    assert all(df.empty for df in reports.values())
+    
+    # Check that warnings were logged for missing files
+    assert any('Missing anomaly CSV file' in record.message for record in caplog.records)
+
+
+def test_malformed_csv_handling(temp_config, caplog):
+    """Test that malformed CSV files log errors and return empty DataFrames"""
+    import logging
+    
+    # Create a malformed CSV file
+    malformed_csv = temp_config.REPORTS_DIR / 'anomalias_fluxo.csv'
+    malformed_csv.write_text('invalid;csv;content\nwith;mismatched;columns;extra', encoding='utf-8')
+    
+    generator = PublicReportGenerator(config=temp_config)
+    
+    with caplog.at_level(logging.ERROR):
+        reports = generator.load_anomaly_reports()
+    
+    # The malformed file should result in empty DataFrame
+    assert reports['flow_anomalies'].empty
+    
+    # Check that error was logged
+    assert any('Failed to parse CSV file' in record.message for record in caplog.records)
+
+
+def test_file_write_failure_raises_ioerror(generator_with_data):
+    """Test that file write failures raise IOError with descriptive message"""
+    # Try to write to an invalid path (e.g., directory that can't be created)
+    invalid_path = '/root/invalid_path/report.md'
+    
+    with pytest.raises(IOError) as exc_info:
+        generator_with_data.generate_report(
+            output_format='markdown',
+            output_file=invalid_path
+        )
+    
+    # Check that error message is descriptive
+    assert 'Failed to write report' in str(exc_info.value)
+    assert invalid_path in str(exc_info.value)
+
+
+def test_incomplete_summary_dict_raises_keyerror(generator_with_data):
+    """Test that incomplete summary dict raises KeyError with missing key name"""
+    reports = generator_with_data.load_anomaly_reports()
+    
+    # Create incomplete summary (missing required keys)
+    incomplete_summary = {
+        'generation_date': '2024-01-01',
+        'total_anomalies': 10,
+        # Missing other required keys
+    }
+    
+    with pytest.raises(KeyError) as exc_info:
+        generator_with_data._build_report_data(incomplete_summary, reports)
+    
+    # Check that error message includes the missing key name
+    assert 'missing required key' in str(exc_info.value).lower()
+
+
+def test_incomplete_severity_distribution_raises_keyerror(generator_with_data):
+    """Test that incomplete severity distribution raises KeyError"""
+    reports = generator_with_data.load_anomaly_reports()
+    
+    # Create summary with incomplete severity_distribution
+    incomplete_summary = {
+        'generation_date': '2024-01-01',
+        'total_anomalies': 10,
+        'unique_funds_affected': 3,
+        'flow_anomalies_count': 3,
+        'pl_drops_count': 2,
+        'runs_count': 3,
+        'divergences_count': 2,
+        'severity_distribution': {
+            'high': 5,
+            # Missing 'medium' and 'low'
+        }
+    }
+    
+    with pytest.raises(KeyError) as exc_info:
+        generator_with_data._build_report_data(incomplete_summary, reports)
+    
+    # Check that error message includes the missing key
+    assert 'severity distribution missing required key' in str(exc_info.value).lower()
+
+
+def test_file_write_with_readonly_directory(temp_config):
+    """Test file write failure when directory is read-only"""
+    import os
+    import stat
+    
+    # Create a read-only directory
+    readonly_dir = temp_config.REPORTS_DIR / 'readonly'
+    readonly_dir.mkdir(exist_ok=True)
+    
+    # Make directory read-only (skip on Windows where this is complex)
+    if os.name != 'nt':
+        os.chmod(readonly_dir, stat.S_IRUSR | stat.S_IXUSR)
+        
+        generator = PublicReportGenerator(config=temp_config)
+        output_file = readonly_dir / 'report.md'
+        
+        try:
+            with pytest.raises(IOError) as exc_info:
+                generator.generate_report(
+                    output_format='markdown',
+                    output_file=str(output_file)
+                )
+            
+            assert 'Failed to write report' in str(exc_info.value)
+        finally:
+            # Restore permissions for cleanup
+            os.chmod(readonly_dir, stat.S_IRWXU)
+
+
+def test_empty_csv_files_handled_gracefully(temp_config):
+    """Test that empty CSV files are handled without errors"""
+    # Create empty CSV files
+    (temp_config.REPORTS_DIR / 'anomalias_fluxo.csv').write_text('', encoding='utf-8')
+    (temp_config.REPORTS_DIR / 'quedas_pl.csv').write_text('', encoding='utf-8')
+    
+    generator = PublicReportGenerator(config=temp_config)
+    reports = generator.load_anomaly_reports()
+    
+    # Should return empty DataFrames without errors
+    assert reports['flow_anomalies'].empty
+    assert reports['pl_drops'].empty
+
+
+def test_csv_with_only_headers(temp_config):
+    """Test CSV files with only headers (no data rows)"""
+    # Create CSV with only headers
+    csv_content = 'CNPJ_FUNDO;DT_COMPTC;FLUXO_LIQ_DIA;Z_SCORE_FLOW\n'
+    (temp_config.REPORTS_DIR / 'anomalias_fluxo.csv').write_text(csv_content, encoding='utf-8')
+    
+    generator = PublicReportGenerator(config=temp_config)
+    reports = generator.load_anomaly_reports()
+    
+    # Should return empty DataFrame (no data rows)
+    assert reports['flow_anomalies'].empty
+
+
+def test_all_required_summary_keys_validated():
+    """Test that all required summary keys are validated"""
+    generator = PublicReportGenerator()
+    reports = {
+        'flow_anomalies': pd.DataFrame(),
+        'pl_drops': pd.DataFrame(),
+        'runs': pd.DataFrame(),
+        'divergences': pd.DataFrame(),
+    }
+    
+    required_keys = [
+        'generation_date',
+        'total_anomalies',
+        'unique_funds_affected',
+        'flow_anomalies_count',
+        'pl_drops_count',
+        'runs_count',
+        'divergences_count',
+        'severity_distribution',
+    ]
+    
+    # Test each missing key individually
+    for missing_key in required_keys:
+        summary = {
+            'generation_date': '2024-01-01',
+            'total_anomalies': 10,
+            'unique_funds_affected': 3,
+            'flow_anomalies_count': 3,
+            'pl_drops_count': 2,
+            'runs_count': 3,
+            'divergences_count': 2,
+            'severity_distribution': {'high': 1, 'medium': 2, 'low': 3},
+        }
+        
+        # Remove the key we're testing
+        del summary[missing_key]
+        
+        with pytest.raises(KeyError) as exc_info:
+            generator._build_report_data(summary, reports)
+        
+        assert missing_key in str(exc_info.value).lower()

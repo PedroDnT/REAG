@@ -130,7 +130,7 @@ REAG/
 │   ├── 02_identify_reag_funds.ipynb
 │   ├── 03_flow_analysis.ipynb
 │   └── 04_anomaly_detection.ipynb
-├── scripts/              # Scripts utilitários
+├── scripts/              # Scripts utilitáriosç
 │   └── generate_public_report.py
 ├── data/
 │   ├── raw/             # Dados brutos da CVM

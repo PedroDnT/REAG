@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional
 from pathlib import Path
-from scipy import stats
 from config.constants import (
     MIN_OBSERVATIONS,
     PONZI_LOW_VOLATILITY_PCT,

@@ -17,10 +17,11 @@ import logging
 
 import pandas as pd
 import numpy as np
-from scipy import stats
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import matplotlib.pyplot as plt
+
+from src.utils.statistics import chi2_cdf
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +160,8 @@ class BenfordLawAnalyzer:
         # Degrees of freedom = 9 digits - 1
         df = 8
         
-        # Calculate p-value
-        p_value = 1 - stats.chi2.cdf(chi_square, df)
+        # Calculate p-value using our chi2_cdf implementation
+        p_value = 1 - chi2_cdf(chi_square, df)
         
         # Test significance
         is_significant = p_value < self.alpha

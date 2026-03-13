@@ -117,85 +117,100 @@ class DataProcessor:
         series = pd.Series(cnpj_list, dtype='string')
         normalized = cls._normalize_cnpj_series(series).dropna()
         return normalized.tolist()
+    def _read_csv_generic(self, 
+                         file_path: Path,
+                         file_type: str,
+                         encoding: str = 'latin1',
+                         sep: str = ';',
+                         date_cols: Optional[List[str]] = None,
+                         cnpj_cols: Optional[List[str]] = None,
+                         numeric_cols: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        Generic CSV reader with common transformations.
+        
+        Consolidates duplicate logic from read_informe_diario, read_cda, and read_cadastro.
+        
+        Args:
+            file_path: Path to CSV file
+            file_type: Type of file for logging (e.g., "Informe Diario", "CDA", "Cadastro")
+            encoding: File encoding
+            sep: CSV separator
+            date_cols: List of date columns to parse
+            cnpj_cols: List of CNPJ columns to normalize
+            numeric_cols: List of numeric columns to coerce
+            
+        Returns:
+            Processed DataFrame or empty DataFrame on error
+        """
+        try:
+            df = pd.read_csv(file_path, encoding=encoding, sep=sep)
+            
+            # Padronizar nomes de colunas
+            df = self._normalize_columns(df)
+            df = self._apply_column_aliases(df)
+            
+            # Converter datas
+            if date_cols:
+                for col in date_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
+            
+            # Normalizar CNPJs
+            if cnpj_cols:
+                for col in cnpj_cols:
+                    if col in df.columns:
+                        df[col] = self._normalize_cnpj_series(df[col])
+            
+            # Converter valores numéricos
+            if numeric_cols:
+                df = self._coerce_numeric(df, numeric_cols)
+            
+            return df
+        except Exception as e:
+            logger.error(f"Erro ao ler {file_type} {file_path}: {e}")
+            return pd.DataFrame()
+    
     def read_informe_diario(self, file_path: Path,
                            encoding: str = 'latin1',
                            sep: str = ';') -> pd.DataFrame:
         """Lê arquivo de Informe Diário"""
-        try:
-            df = pd.read_csv(file_path, encoding=encoding, sep=sep)
-
-            # Padronizar nomes de colunas
-            df = self._normalize_columns(df)
-            df = self._apply_column_aliases(df)
-
-            # Converter data
-            if 'DT_COMPTC' in df.columns:
-                df['DT_COMPTC'] = pd.to_datetime(df['DT_COMPTC'], format='%Y-%m-%d', errors='coerce')
-
-            if 'CNPJ_FUNDO' in df.columns:
-                df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
-
-            # Converter valores numéricos
-            numeric_cols = ['VL_TOTAL', 'VL_QUOTA', 'VL_PATRIM_LIQ', 'CAPTC_DIA', 'RESG_DIA', 'NR_COTST']
-            df = self._coerce_numeric(df, numeric_cols)
-
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao ler Informe Diario {file_path}: {e}")
-            return pd.DataFrame()
-
+        return self._read_csv_generic(
+            file_path=file_path,
+            file_type="Informe Diario",
+            encoding=encoding,
+            sep=sep,
+            date_cols=['DT_COMPTC'],
+            cnpj_cols=['CNPJ_FUNDO'],
+            numeric_cols=['VL_TOTAL', 'VL_QUOTA', 'VL_PATRIM_LIQ', 'CAPTC_DIA', 'RESG_DIA', 'NR_COTST']
+        )
+    
     def read_cda(self, file_path: Path,
                  encoding: str = 'latin1',
                  sep: str = ';') -> pd.DataFrame:
         """Lê arquivo de CDA (Composição de Carteira)"""
-        try:
-            df = pd.read_csv(file_path, encoding=encoding, sep=sep)
-
-            # Padronizar nomes de colunas
-            df = self._normalize_columns(df)
-            df = self._apply_column_aliases(df)
-
-            # Converter data
-            if 'DT_COMPTC' in df.columns:
-                df['DT_COMPTC'] = pd.to_datetime(df['DT_COMPTC'], format='%Y-%m-%d', errors='coerce')
-
-            if 'CNPJ_FUNDO' in df.columns:
-                df['CNPJ_FUNDO'] = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
-
-            # Converter valores numéricos
-            numeric_cols = ['VL_MERC_POS_FINAL', 'QT_POS_FINAL', 'VL_CUSTO_POS_FINAL']
-            df = self._coerce_numeric(df, numeric_cols)
-
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao ler CDA {file_path}: {e}")
-            return pd.DataFrame()
-
+        return self._read_csv_generic(
+            file_path=file_path,
+            file_type="CDA",
+            encoding=encoding,
+            sep=sep,
+            date_cols=['DT_COMPTC'],
+            cnpj_cols=['CNPJ_FUNDO'],
+            numeric_cols=['VL_MERC_POS_FINAL', 'QT_POS_FINAL', 'VL_CUSTO_POS_FINAL']
+        )
+    
     def read_cadastro(self, file_path: Path,
                      encoding: str = 'latin1',
                      sep: str = ';') -> pd.DataFrame:
         """Lê arquivo de Cadastro de Fundos"""
-        try:
-            df = pd.read_csv(file_path, encoding=encoding, sep=sep)
-
-            # Padronizar nomes de colunas
-            df = self._normalize_columns(df)
-            df = self._apply_column_aliases(df)
-
-            for col in ['CNPJ_FUNDO', 'CNPJ_ADMIN', 'CNPJ_GESTOR']:
-                if col in df.columns:
-                    df[col] = self._normalize_cnpj_series(df[col])
-
-            # Converter data
-            date_cols = ['DT_REG', 'DT_CONST', 'DT_CANCEL', 'DT_INI_SIT', 'DT_INI_ATIV', 'DT_INI_EXERC', 'DT_FIM_EXERC']
-            for col in date_cols:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
-
-            return df
-        except Exception as e:
-            logger.error(f"Erro ao ler Cadastro {file_path}: {e}")
-            return pd.DataFrame()
+        return self._read_csv_generic(
+            file_path=file_path,
+            file_type="Cadastro",
+            encoding=encoding,
+            sep=sep,
+            date_cols=['DT_REG', 'DT_CONST', 'DT_CANCEL', 'DT_INI_SIT', 'DT_INI_ATIV', 'DT_INI_EXERC', 'DT_FIM_EXERC'],
+            cnpj_cols=['CNPJ_FUNDO', 'CNPJ_ADMIN', 'CNPJ_GESTOR'],
+            numeric_cols=None
+        )
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """

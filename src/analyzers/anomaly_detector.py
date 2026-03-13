@@ -2,7 +2,6 @@ import logging
 
 import pandas as pd
 import numpy as np
-from scipy import stats
 from typing import Optional, Tuple
 from config.settings import Config
 from config.constants import (
@@ -11,6 +10,7 @@ from config.constants import (
     ZSCORE_WARNING,
 )
 from src.analyzers.base import BaseAnalyzer
+from src.utils.statistics import calculate_z_scores
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,6 @@ class AnomalyDetector(BaseAnalyzer):
             threshold=self.config.ANOMALY_Z_SCORE_THRESHOLD
         )
 
-    def calculate_z_scores(self, series: pd.Series) -> pd.Series:
-        """Calcula Z-scores para uma série"""
-        return (series - series.mean()) / series.std()
-
     def detect_flow_anomalies(self, df: pd.DataFrame,
                              threshold: float = 3.0,
                              flow_col: str = 'FLUXO_LIQ_DIA') -> pd.DataFrame:
@@ -56,13 +52,13 @@ class AnomalyDetector(BaseAnalyzer):
 
         df = df.copy()
 
-        # Calcular Z-score por fundo
+        # Calcular Z-score por fundo usando função consolidada
         if 'CNPJ_FUNDO' in df.columns:
             df['Z_SCORE_FLOW'] = df.groupby('CNPJ_FUNDO')[flow_col].transform(
-                lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
+                lambda x: calculate_z_scores(x, robust=False)
             )
         else:
-            df['Z_SCORE_FLOW'] = self.calculate_z_scores(df[flow_col])
+            df['Z_SCORE_FLOW'] = calculate_z_scores(df[flow_col], robust=False)
 
         # Identificar anomalias
         df['IS_ANOMALY_FLOW'] = df['Z_SCORE_FLOW'].abs() > threshold
@@ -166,12 +162,12 @@ class AnomalyDetector(BaseAnalyzer):
         # Calcular retorno diário da cota
         df['RETORNO_DIA'] = df.groupby('CNPJ_FUNDO')['VL_QUOTA'].pct_change() * 100
 
-        # Calcular Z-score de fluxo e retorno
+        # Calcular Z-score de fluxo e retorno usando função consolidada
         df['Z_FLOW'] = df.groupby('CNPJ_FUNDO')['FLUXO_LIQ_DIA'].transform(
-            lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
+            lambda x: calculate_z_scores(x, robust=False)
         )
         df['Z_RETORNO'] = df.groupby('CNPJ_FUNDO')['RETORNO_DIA'].transform(
-            lambda x: (x - x.mean()) / x.std() if x.std() > 0 else 0
+            lambda x: calculate_z_scores(x, robust=False)
         )
 
         # Divergência: fluxo e retorno em direções opostas com magnitudes altas
