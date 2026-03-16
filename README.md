@@ -19,6 +19,28 @@ Identificar irregularidades e padrões suspeitos nos fundos administrados pela R
 - **Atualização**: Diária (meses corrente e anterior), semanal (demais meses)
 - **Histórico**: Dados anteriores a 12 meses devem ser baixados do arquivo histórico
 
+## 🌐 Web App Interativo
+
+Explore os achados da investigação e identifique outros fundos suspeitos através da interface web:
+
+```bash
+# Inicie o webapp
+streamlit run webapp/app.py
+```
+
+Acesse em **http://localhost:8501**. O app inclui:
+
+| Página | Descrição |
+|--------|-----------|
+| 📊 **Dashboard** | Visão geral dos achados: mapa de risco, KPIs e principais irregularidades |
+| 🏦 **Explorar Fundos** | Filtre e investigue fundos individualmente com evolução de PL e carteira |
+| 📈 **Anomalias de Fluxo** | Detecção interativa via Z-score (limiar ajustável) |
+| 🔢 **Lei de Benford** | Análise de distribuição de algarismos por fundo |
+| 🕵️ **Padrões de Fraude** | Esquemas detectados: fluxo circular, ativos fantasma, layering |
+| 📋 **Comparação com Peers** | Benchmarking REAG vs. fundos similares do mercado |
+
+> ⚠️ O app funciona com dados sintéticos demonstrativos. Para análise com dados reais execute primeiro os notebooks de coleta.
+
 ## 🚀 Instalação
 
 ### Pré-requisitos
