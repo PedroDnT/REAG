@@ -28,6 +28,20 @@ from src.enrichment.interfaces import SearchResult
 from src.explain.explainer import Explainer
 from src.processors.data_processor import DataProcessor
 
+ANALYSIS_CHOICES = (
+    "flow",
+    "schemes",
+    "phantom_assets",
+    "quotaholder",
+    "cost_basis",
+    "reconciliation",
+    "lifecycle",
+    "manager_network",
+    "window_dressing",
+    "valuation_smoothing",
+    "cross_fund_issuer",
+)
+
 
 @dataclass(frozen=True)
 class LoadedData:
@@ -36,9 +50,9 @@ class LoadedData:
     cda: pd.DataFrame | None
 
 
-def main() -> int:
-    args = _parse_args()
+def run_investigation(args: argparse.Namespace) -> int:
     config = Config()
+    selected_analyses = _selected_analyses(args.analysis)
 
     run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) if args.output_dir else (config.REPORTS_DIR / "investigation" / run_id)
@@ -54,7 +68,7 @@ def main() -> int:
     findings_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Core detectors (public-data based) ---
-    if loaded.informe is not None and not loaded.informe.empty:
+    if "flow" in selected_analyses and loaded.informe is not None and not loaded.informe.empty:
         informe = loaded.informe.copy()
         informe = processor.calculate_net_flow(informe)
 
@@ -68,7 +82,15 @@ def main() -> int:
         if "divergences" in results:
             pass
 
-    if loaded.cda is not None and not loaded.cda.empty and loaded.cadastro is not None and not loaded.cadastro.empty and loaded.informe is not None and not loaded.informe.empty:
+    if (
+        "schemes" in selected_analyses
+        and loaded.cda is not None
+        and not loaded.cda.empty
+        and loaded.cadastro is not None
+        and not loaded.cadastro.empty
+        and loaded.informe is not None
+        and not loaded.informe.empty
+    ):
         cda = _normalize_cda_columns(loaded.cda)
 
         scheme_detector = FraudSchemeDetector()
@@ -90,7 +112,7 @@ def main() -> int:
             results[key] = df
             sources[key] = _save_finding(df, findings_dir / f"{key}.csv")
 
-    if loaded.cda is not None and not loaded.cda.empty:
+    if "phantom_assets" in selected_analyses and loaded.cda is not None and not loaded.cda.empty:
         cda = _normalize_cda_columns(loaded.cda)
         phantom = EnhancedPhantomAssetDetector(cache_dir=Path("data/cache"))
         # Best-effort: load valid funds list when cadastro file exists on disk.
@@ -111,7 +133,12 @@ def main() -> int:
     # --- New analyzers ---
 
     # Quotaholder analysis (needs informe with NR_COTST)
-    if loaded.informe is not None and not loaded.informe.empty and "NR_COTST" in loaded.informe.columns:
+    if (
+        "quotaholder" in selected_analyses
+        and loaded.informe is not None
+        and not loaded.informe.empty
+        and "NR_COTST" in loaded.informe.columns
+    ):
         try:
             quotaholder = QuotaholderAnalyzer(config=config)
             qh_results = quotaholder.analyze(loaded.informe, cadastro_df=loaded.cadastro)
@@ -121,7 +148,12 @@ def main() -> int:
             pass
 
     # Cost basis analysis (needs cda with VL_CUSTO_POS_FINAL)
-    if loaded.cda is not None and not loaded.cda.empty and "VL_CUSTO_POS_FINAL" in loaded.cda.columns:
+    if (
+        "cost_basis" in selected_analyses
+        and loaded.cda is not None
+        and not loaded.cda.empty
+        and "VL_CUSTO_POS_FINAL" in loaded.cda.columns
+    ):
         try:
             cda = _normalize_cda_columns(loaded.cda)
             cost_basis = CostBasisAnalyzer(config=config)
@@ -132,7 +164,13 @@ def main() -> int:
             pass
 
     # Portfolio reconciliation (needs cda + informe)
-    if loaded.cda is not None and not loaded.cda.empty and loaded.informe is not None and not loaded.informe.empty:
+    if (
+        "reconciliation" in selected_analyses
+        and loaded.cda is not None
+        and not loaded.cda.empty
+        and loaded.informe is not None
+        and not loaded.informe.empty
+    ):
         try:
             cda = _normalize_cda_columns(loaded.cda)
             recon = PortfolioReconciliationAnalyzer(config=config)
@@ -143,7 +181,12 @@ def main() -> int:
             pass
 
     # Fund lifecycle analysis (needs cadastro)
-    if loaded.cadastro is not None and not loaded.cadastro.empty and "DT_CONST" in loaded.cadastro.columns:
+    if (
+        "lifecycle" in selected_analyses
+        and loaded.cadastro is not None
+        and not loaded.cadastro.empty
+        and "DT_CONST" in loaded.cadastro.columns
+    ):
         try:
             lifecycle = FundLifecycleAnalyzer(config=config)
             lc_results = lifecycle.analyze(loaded.cadastro, informe_df=loaded.informe)
@@ -153,7 +196,12 @@ def main() -> int:
             pass
 
     # Manager network analysis (needs cadastro with CNPJ_GESTOR)
-    if loaded.cadastro is not None and not loaded.cadastro.empty and "CNPJ_GESTOR" in loaded.cadastro.columns:
+    if (
+        "manager_network" in selected_analyses
+        and loaded.cadastro is not None
+        and not loaded.cadastro.empty
+        and "CNPJ_GESTOR" in loaded.cadastro.columns
+    ):
         try:
             manager_net = ManagerNetworkAnalyzer(config=config)
             mn_results = manager_net.analyze(
@@ -167,7 +215,12 @@ def main() -> int:
             pass
 
     # Window dressing (needs informe with VL_QUOTA)
-    if loaded.informe is not None and not loaded.informe.empty and "VL_QUOTA" in loaded.informe.columns:
+    if (
+        "window_dressing" in selected_analyses
+        and loaded.informe is not None
+        and not loaded.informe.empty
+        and "VL_QUOTA" in loaded.informe.columns
+    ):
         try:
             wd = WindowDressingDetector(config=config)
             wd_results = wd.analyze(loaded.informe)
@@ -177,7 +230,12 @@ def main() -> int:
             pass
 
     # Valuation smoothing (needs informe with VL_QUOTA)
-    if loaded.informe is not None and not loaded.informe.empty and "VL_QUOTA" in loaded.informe.columns:
+    if (
+        "valuation_smoothing" in selected_analyses
+        and loaded.informe is not None
+        and not loaded.informe.empty
+        and "VL_QUOTA" in loaded.informe.columns
+    ):
         try:
             vs = ValuationSmoothingAnalyzer(config=config)
             vs_results = vs.analyze(loaded.informe)
@@ -187,7 +245,13 @@ def main() -> int:
             pass
 
     # Cross-fund issuer analysis (needs cda + cadastro)
-    if loaded.cda is not None and not loaded.cda.empty and loaded.cadastro is not None and not loaded.cadastro.empty:
+    if (
+        "cross_fund_issuer" in selected_analyses
+        and loaded.cda is not None
+        and not loaded.cda.empty
+        and loaded.cadastro is not None
+        and not loaded.cadastro.empty
+    ):
         try:
             cda = _normalize_cda_columns(loaded.cda)
             cfi = CrossFundIssuerAnalyzer(config=config)
@@ -236,7 +300,7 @@ def main() -> int:
     return 0
 
 
-def _parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a REAG investigation and generate human-readable briefs.")
     parser.add_argument("--run-id", default=None, help="Optional run identifier (defaults to timestamp).")
     parser.add_argument("--output-dir", default=None, help="Output directory (defaults to reports/investigation/<run_id>).")
@@ -257,13 +321,36 @@ def _parse_args() -> argparse.Namespace:
         default="both",
         help="Which formats to generate for briefs.",
     )
+    parser.add_argument(
+        "--analysis",
+        nargs="+",
+        choices=[*ANALYSIS_CHOICES, "all"],
+        default=["all"],
+        help="Which investigation modules to run. Defaults to all modules.",
+    )
 
     parser.add_argument("--enable-enrichment", action="store_true", help="Enable external context enrichment (Exa first).")
     parser.add_argument("--enrichment-provider", choices=["exa", "perplexity"], default="exa", help="Enrichment provider.")
     parser.add_argument("--enrichment-since-days", type=int, default=365, help="How far back to search.")
     parser.add_argument("--enrichment-max-results", type=int, default=8, help="Maximum results per query.")
 
-    return parser.parse_args()
+    return parser
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def _selected_analyses(values: list[str] | None) -> set[str]:
+    selected = set(values or ["all"])
+    if "all" in selected or not selected:
+        return set(ANALYSIS_CHOICES)
+    return selected
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    return run_investigation(args)
 
 
 def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProcessor) -> LoadedData:
