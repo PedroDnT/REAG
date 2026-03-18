@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,31 @@ from src.enrichment.exa_provider import ExaProvider
 from src.enrichment.interfaces import SearchResult
 from src.explain.explainer import Explainer
 from src.processors.data_processor import DataProcessor
+
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def sanitize_run_id(run_id: str) -> str:
+    """Return *run_id* if it matches the safe pattern, otherwise a timestamp fallback.
+
+    Rejects absolute paths, path-traversal segments, and any characters that
+    could affect file-system placement when used as a directory component.
+
+    Parameters
+    ----------
+    run_id:
+        The candidate run identifier supplied by the user.
+
+    Returns
+    -------
+    str
+        *run_id* unchanged when it matches ``^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$``;
+        otherwise a ``%Y%m%d_%H%M%S`` timestamp string.
+    """
+    if _RUN_ID_RE.match(run_id):
+        return run_id
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 ANALYSIS_CHOICES = (
     "flow",
@@ -54,7 +80,7 @@ def run_investigation(args: argparse.Namespace) -> int:
     config = Config()
     selected_analyses = _selected_analyses(args.analysis)
 
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = sanitize_run_id(args.run_id) if args.run_id else datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir) if args.output_dir else (config.REPORTS_DIR / "investigation" / run_id)
     output_dir.mkdir(parents=True, exist_ok=True)
 
