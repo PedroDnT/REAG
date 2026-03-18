@@ -8,6 +8,7 @@ __pycache__/
 .coverage
 .coverage.*
 .pytest_cache/
+.hypothesis/
 venv/
 env/
 ENV/
