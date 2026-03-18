@@ -201,7 +201,9 @@ def _print_result_summary(output_dir: Path, *, print_fn: PrintFn) -> None:
 
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
     counts = payload.get("outputs", {}).get("counts", {})
-    report_path = output_dir / "report.html"
+    report_html = output_dir / "report.html"
+    report_md = output_dir / "report.md"
+    report_path = report_html if report_html.exists() else (report_md if report_md.exists() else None)
 
     print_fn("")
     print_fn("Investigation completed.")
