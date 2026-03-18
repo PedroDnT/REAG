@@ -10,7 +10,7 @@ from scripts import investigation_tui
 from scripts import run_investigation
 
 
-def test_selected_analyses_expands_all():
+def test_run_investigation_selected_analyses_expands_all():
     assert run_investigation._selected_analyses(["all"]) == set(run_investigation.ANALYSIS_CHOICES)
 
 
@@ -29,15 +29,15 @@ def test_run_investigation_respects_analysis_filter(tmp_path, monkeypatch):
         def generate_anomaly_report(self, informe, cda_df=None):
             return {"flow_anomalies": pd.DataFrame({"CNPJ_FUNDO": ["12345678000190"]})}
 
-    def fail_if_called(*args, **kwargs):
+    def should_not_be_called(*args, **kwargs):
         raise AssertionError("analysis outside the requested filter should not run")
 
     monkeypatch.setattr(run_investigation, "DataProcessor", StubProcessor)
     monkeypatch.setattr(run_investigation, "AnomalyDetector", StubAnomalyDetector)
-    monkeypatch.setattr(run_investigation, "FraudSchemeDetector", fail_if_called)
-    monkeypatch.setattr(run_investigation, "EnhancedPhantomAssetDetector", fail_if_called)
-    monkeypatch.setattr(run_investigation, "PortfolioReconciliationAnalyzer", fail_if_called)
-    monkeypatch.setattr(run_investigation, "CrossFundIssuerAnalyzer", fail_if_called)
+    monkeypatch.setattr(run_investigation, "FraudSchemeDetector", should_not_be_called)
+    monkeypatch.setattr(run_investigation, "EnhancedPhantomAssetDetector", should_not_be_called)
+    monkeypatch.setattr(run_investigation, "PortfolioReconciliationAnalyzer", should_not_be_called)
+    monkeypatch.setattr(run_investigation, "CrossFundIssuerAnalyzer", should_not_be_called)
     monkeypatch.setattr(
         run_investigation,
         "_load_data",

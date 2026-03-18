@@ -343,12 +343,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _selected_analyses(values: list[str] | None) -> set[str]:
     selected = set(values or ["all"])
-    if "all" in selected or not selected:
+    if "all" in selected:
         return set(ANALYSIS_CHOICES)
     return selected
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse CLI arguments and execute the investigation pipeline."""
     args = _parse_args(argv)
     return run_investigation(args)
 

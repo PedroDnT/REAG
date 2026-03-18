@@ -17,6 +17,7 @@ from scripts.run_investigation import build_parser, run_investigation
 
 InputFn = Callable[[str], str]
 PrintFn = Callable[[str], None]
+MenuOptions = dict[str, tuple[str, object]]
 
 INVESTIGATION_PRESETS: dict[str, tuple[str, list[str]]] = {
     "1": (
@@ -40,6 +41,11 @@ REPORT_FORMATS = {
     "3": ("HTML and Markdown", "both"),
 }
 
+ENRICHMENT_PROVIDERS = {
+    "1": ("Exa", "exa"),
+    "2": ("Perplexity", "perplexity"),
+}
+
 INPUT_MODES = {
     "1": ("Use default data discovery", "quick"),
     "2": ("Choose custom files and folders", "custom"),
@@ -48,12 +54,13 @@ INPUT_MODES = {
 
 def _prompt_choice(
     prompt: str,
-    options: dict[str, tuple[str, str] | tuple[str, list[str]]],
+    options: MenuOptions,
     *,
     default: str,
     input_fn: InputFn,
     print_fn: PrintFn,
 ) -> str:
+    """Prompt for a numbered menu selection and return the selected key."""
     while True:
         print_fn(prompt)
         for key, value in options.items():
@@ -71,7 +78,7 @@ def _prompt_text(prompt: str, *, default: str, input_fn: InputFn) -> str:
 
 def _prompt_optional_text(prompt: str, *, input_fn: InputFn) -> str | None:
     answer = input_fn(f"{prompt} [optional]: ").strip()
-    return answer or None
+    return answer if answer else None
 
 
 def _prompt_yes_no(prompt: str, *, default: bool, input_fn: InputFn, print_fn: PrintFn) -> bool:
@@ -154,22 +161,19 @@ def build_tui_args(*, input_fn: InputFn = input, print_fn: PrintFn = print) -> a
     if values["enable_enrichment"]:
         provider_key = _prompt_choice(
             "Which enrichment provider do you want to use?",
-            {
-                "1": ("Exa", "exa"),
-                "2": ("Perplexity", "perplexity"),
-            },
+            ENRICHMENT_PROVIDERS,
             default="1",
             input_fn=input_fn,
             print_fn=print_fn,
         )
-        values["enrichment_provider"] = "exa" if provider_key == "1" else "perplexity"
+        values["enrichment_provider"] = ENRICHMENT_PROVIDERS[provider_key][1]
 
     print_fn("")
     print_fn("Planned investigation:")
     print_fn(f"- Focus: {INVESTIGATION_PRESETS[investigation_key][0]}")
     print_fn(f"- Report format: {REPORT_FORMATS[report_key][0]}")
     print_fn(f"- Run id: {run_id}")
-    print_fn(f"- Output directory: {output_dir or 'reports/investigation/<run_id>'}")
+    print_fn(f"- Output directory: {output_dir or f'reports/investigation/{run_id}'}")
 
     if not _prompt_yes_no(
         "Start the investigation now?",
