@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/utils/caching.py
+# hypothesis_version: 6.151.9
+
+[1024, '*', 'cache_dir', 'data/cache', 'json', 'newest_file', 'num_files', 'oldest_file', 'pickle', 'pkl', 'r', 'rb', 'total_size_mb', 'w', 'wb']

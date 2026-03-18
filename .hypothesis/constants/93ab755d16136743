@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/analyzers/quotaholder_analyzer.py
+# hypothesis_version: 6.151.9
+
+[-0.15, -0.1, 0.2, 3.0, 4.0, 5.0, 100.0, 100, 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CRITICAL', 'DT_COMPTC', 'HIGH', 'LOW', 'MEDIUM', 'NR_COTST', 'VL_PATRIM_LIQ', 'coordinated_exodus', 'informe_df', 'inner', 'mass_exodus', 'pct_change', 'per_capita_aum', 'severity', 'signal_type', 'z_score']

@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .base import BaseAnalyzer
+from src.utils.validation import normalize_cnpj_digits
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +193,8 @@ class ManagerNetworkAnalyzer(BaseAnalyzer):
         if enriched.empty:
             return findings
 
-        def _normalize_cnpj(val: Any) -> str:
-            return "".join(ch for ch in str(val) if ch.isdigit())
-
-        enriched["gestor_digits"] = enriched["CNPJ_GESTOR"].apply(_normalize_cnpj)
-        enriched["emissor_digits"] = enriched["EMISSOR"].apply(_normalize_cnpj)
+        enriched["gestor_digits"] = enriched["CNPJ_GESTOR"].apply(normalize_cnpj_digits)
+        enriched["emissor_digits"] = enriched["EMISSOR"].apply(normalize_cnpj_digits)
 
         circular = enriched[
             (enriched["gestor_digits"].str.len() >= 8)

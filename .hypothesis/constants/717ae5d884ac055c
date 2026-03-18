@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/analyzers/fraud_schemes.py
+# hypothesis_version: 6.151.9
+
+[100, '=', 'CDB', 'CD_ATIVO', 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CRA', 'CRI', 'CRITICAL', 'DEBENTURE', 'DT_COMPTC', 'EIRELI', 'EMISSOR', 'HIGH', 'LTDA EPP', 'LTDA ME', 'LTDA-ME', 'MEDIUM', 'VERY_HIGH', 'VL_MERCADO', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'admin_cnpj', 'asset_inflation', 'asset_inflation.csv', 'avg_daily_return', 'avg_pl_change', 'circular_flow', 'circular_flow.csv', 'explanation', 'fraud_pattern', 'fund_as_asset', 'fund_cnpj', 'held_admin', 'held_by_funds', 'held_fund', 'holder_admin', 'holder_fund', 'illiquid_pct', 'investment_value', 'layered_funds', 'layered_funds.csv', 'num_funds_affected', 'severity', 'shell_networks', 'shell_networks.csv', 'suspicious_issuers', 'suspicious_pct', 'suspicious_value', 'total_value', '|']

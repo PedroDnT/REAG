@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/analyzers/anomaly_detector.py
+# hypothesis_version: 6.151.9
+
+[3.0, 20.0, 50.0, 100, 'CNPJ_FUNDO', 'DIVERGENCE_SCORE', 'DT_COMPTC', 'FLUXO_LIQ_DIA', 'IS_ANOMALY_FLOW', 'IS_NEGATIVE_FLOW', 'IS_PL_DROP', 'PCT_CARTEIRA', 'PL_VAR_PCT', 'RETORNO_DIA', 'RUN_ID', 'RUN_LENGTH', 'TOTAL_CARTEIRA', 'VL_MERC_POS_FINAL', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'Z_FLOW', 'Z_RETORNO', 'Z_SCORE_FLOW', 'concentration_spikes', 'divergences', 'flow_anomalies', 'pl_drops', 'runs']

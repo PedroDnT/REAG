@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/analyzers/peer_comparison.py
+# hypothesis_version: 6.151.9
+
+[100, 999, '=', 'CLASSE', 'CNPJ_FUNDO', 'DT_COMPTC', 'EQUITY', 'FIXED_INCOME', 'FX', 'Fundo Cambial', 'Fundo Multimercado', 'Fundo de Ações', 'Fundo de Renda Fixa', 'HIDDEN_LOSSES', 'MULTI_MARKET', 'OTHER', 'REAL_ESTATE', 'RESUMO', 'RETORNO_DIA', 'RETURNS_TOO_HIGH', 'UNKNOWN', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'all_metrics', 'avg_pl', 'avg_return', 'category', 'fraud_flag', 'fund_return', 'fund_sharpe', 'fund_volatility', 'is_outlier', 'num_days', 'num_observations', 'num_peers', 'peer_avg_return', 'peer_avg_sharpe', 'peer_avg_volatility', 'peer_comparison', 'peer_comparison.csv', 'positive_days_pct', 'return_zscore', 'sharpe_ratio', 'sharpe_zscore', 'smoothed_returns', 'smoothed_returns.csv', 'smoothness_score', 'volatility', 'volatility_zscore']

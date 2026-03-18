@@ -12,21 +12,10 @@ import pandas as pd
 
 from .charts import FundChartOutputs, build_circular_flow_mermaid, render_fund_timeseries_charts, write_mermaid_diagram
 from .signal_registry import SIGNAL_REGISTRY, SignalDefinition, validate_registry
+from src.utils.validation import normalize_cnpj_digits as _normalize_cnpj_digits
 
 
 SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
-
-
-def _normalize_cnpj_digits(value: Any) -> str | None:
-    if value is None:
-        return None
-    digits = "".join(ch for ch in str(value) if ch.isdigit())
-    if not digits:
-        return None
-    if len(digits) == 14:
-        return digits
-    # Keep other lengths (e.g., some identifiers) but do not force zfill here.
-    return digits
 
 
 def _stable_hash(text: str) -> str:

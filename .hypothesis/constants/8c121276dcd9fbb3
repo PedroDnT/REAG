@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/collectors/cvm_collector.py
+# hypothesis_version: 6.151.9
+
+[200, 400, 500, 2021, 2023, 2026, 8192, '.csv', '.zip', 'B', 'cad_fi.csv', 'cad_fi_hist.zip', 'cadastro', 'cda', 'cda_fi', 'content-length', 'inf_diario_fi', 'informe_diario', 'r', 'wb']

@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/analyzers/window_dressing.py
+# hypothesis_version: 6.151.9
+
+[1e-10, 0.3, 2.0, 3.0, 4.0, 100, 'CAPTC_DIA', 'CNPJ_FUNDO', 'DT_COMPTC', 'HIGH', 'MEDIUM', 'RESG_DIA', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'baseline_value', 'coerce', 'daily_return', 'day_of_month', 'days_in_month', 'deviation_pct', 'informe_df', 'is_last_day', 'is_month_end', 'is_quarter_end', 'metric_value', 'month', 'month_boundary', 'month_end', 'net_flow', 'period', 'pl_change', 'post_start', 'pre_end', 'quarter_end', 'severity', 'signal_type']

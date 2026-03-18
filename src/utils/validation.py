@@ -4,7 +4,7 @@ Data validation utilities.
 
 import pandas as pd
 import re
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 
@@ -34,6 +34,22 @@ def validate_dataframe(
             f"{name} is missing required columns: {missing}\n"
             f"Available columns: {df.columns.tolist()}"
         )
+
+
+def normalize_cnpj_digits(value: Any) -> str | None:
+    """
+    Extract only digit characters from a CNPJ value.
+
+    Args:
+        value: Raw CNPJ value in any format (str, numeric, None)
+
+    Returns:
+        String of digits, or None if the input is None or produces no digits
+    """
+    if value is None:
+        return None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    return digits if digits else None
 
 
 def validate_cnpj(cnpj: str) -> bool:

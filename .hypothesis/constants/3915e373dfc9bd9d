@@ -1,0 +1,4 @@
+# file: /home/runner/work/REAG/REAG/src/utils/reporting.py
+# hypothesis_version: 6.151.9
+
+['## Key Findings\n\n', '## Key Metrics\n\n', '## Recommendations\n\n', '### Metrics\n\n', '-', '---\n\n', '=', 'Analysis Report', 'Analysis Summary', 'End of Report\n', 'category', 'content', 'csv', 'data', 'excel', 'executive_summary.md', 'html', 'json', 'metrics', 'number', 'object', 'records', 'report.md', 'reports', 'summary_report.txt', 'w']
