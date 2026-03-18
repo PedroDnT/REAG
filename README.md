@@ -104,7 +104,17 @@ Gera um relatório público agregando todas as anomalias detectadas:
 - Detalhamento de achados (anonimizado)
 - Metodologia e disclaimer
 
-### 6. Automação de fluxo com Playwright
+### 6. Assistente interativo no terminal
+
+```bash
+python scripts/investigation_tui.py
+```
+
+O assistente em modo texto guia a escolha do foco da investigação, permite usar
+os caminhos padrão ou arquivos customizados, executa o pipeline correspondente e
+salva o relatório final em `reports/investigation/<run_id>/report.html`.
+
+### 7. Automação de fluxo com Playwright
 
 Para automatizar um fluxo de navegador com Playwright, configure as variáveis de
 ambiente e execute:
