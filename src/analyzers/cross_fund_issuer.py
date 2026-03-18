@@ -16,6 +16,7 @@ import pandas as pd
 
 from config.constants import CAPTIVE_ISSUER_MIN_FUNDS, ISSUER_NAME_SIMILARITY
 from .base import BaseAnalyzer
+from src.utils.validation import normalize_cnpj_digits
 
 logger = logging.getLogger(__name__)
 
@@ -213,17 +214,14 @@ class CrossFundIssuerAnalyzer(BaseAnalyzer):
     ) -> list[dict[str, Any]]:
         findings: list[dict[str, Any]] = []
 
-        def _normalize(val: Any) -> str:
-            return "".join(ch for ch in str(val) if ch.isdigit())
-
         admins = cadastro_df["CNPJ_ADMIN"].dropna().unique()
-        admin_prefixes = {_normalize(a)[:8]: str(a) for a in admins if len(_normalize(a)) >= 8}
+        admin_prefixes = {d[:8]: str(a) for a in admins if (d := normalize_cnpj_digits(a)) and len(d) >= 8}
 
         issuers = enriched_df[["EMISSOR", "CNPJ_ADMIN"]].drop_duplicates()
 
         for _, row in issuers.iterrows():
-            emissor_digits = _normalize(row["EMISSOR"])
-            if len(emissor_digits) < 8:
+            emissor_digits = normalize_cnpj_digits(row["EMISSOR"])
+            if not emissor_digits or len(emissor_digits) < 8:
                 continue
             emissor_prefix = emissor_digits[:8]
             if emissor_prefix in admin_prefixes:
