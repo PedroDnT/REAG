@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/valuation_smoothing.py
-# hypothesis_version: 6.151.9
-
-[-1.0, 0.15, 0.3, 0.5, 0.7, 'CNPJ_FUNDO', 'CRITICAL', 'DT_COMPTC', 'HIGH', 'LOW', 'MEDIUM', 'VL_QUOTA', 'autocorrelation', 'informe_df', 'low_volatility_ratio', 'severity', 'signal_type', 'stale_days', 'stale_pricing', 'vol_ratio']

@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/processors/data_processor.py
-# hypothesis_version: 6.151.9
-
-['%Y-%m-%d', ',', '.', ';', 'CAPTC_DIA', 'CDA', 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CNPJ_FUNDO_CLASSE', 'CNPJ_GESTOR', 'Cadastro', 'DT_CANCEL', 'DT_COMPTC', 'DT_COMPTC_CLASSE', 'DT_CONST', 'DT_FIM_EXERC', 'DT_INI_ATIV', 'DT_INI_EXERC', 'DT_INI_SIT', 'DT_REG', 'FLUXO_LIQ_DIA', 'Informe Diario', 'NR_COTST', 'QT_POS_FINAL', 'RESG_DIA', 'VL_CUSTO_POS_FINAL', 'VL_MERC_POS_FINAL', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'VL_TOTAL', '\\D', '^\\d{14}$', 'coerce', 'last', 'latin1', 'string', 'sum', 'utf-8', 'ï»¿', '\ufeff']

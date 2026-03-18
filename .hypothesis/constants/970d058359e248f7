@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/fund_lifecycle.py
-# hypothesis_version: 6.151.9
-
-['CAPTC_DIA', 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CRITICAL', 'DT_CANCEL', 'DT_COMPTC', 'DT_CONST', 'HIGH', 'MEDIUM', 'VL_PATRIM_LIQ', 'cadastro_df', 'coerce', 'coordinated_creation', 'days_active', 'hot_start', 'informe_df', 'max_pl', 'severity', 'short_lived_fund', 'signal_type']

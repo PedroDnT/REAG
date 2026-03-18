@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/cost_basis_analyzer.py
-# hypothesis_version: 6.151.9
-
-[0.0, 3.0, 4.0, 5.0, 10.0, 20.0, 'CD_ATIVO', 'CNPJ_FUNDO', 'CRITICAL', 'FUND_LEVEL', 'HIGH', 'LOW', 'MEDIUM', 'VL_CUSTO_POS_FINAL', 'VL_MERCADO', 'cda_df', 'gain_ratio', 'negative_cost_basis', 'severity', 'signal_type', 'zero_cost_asset']

@@ -1,4 +1,0 @@
-# file: /usr/lib/python3/dist-packages/dateutil/easter.py
-# hypothesis_version: 6.151.9
-
-[100, 1600, 'EASTER_JULIAN', 'EASTER_ORTHODOX', 'EASTER_WESTERN', 'easter', 'invalid method']

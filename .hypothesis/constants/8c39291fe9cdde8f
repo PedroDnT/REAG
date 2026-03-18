@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/portfolio_reconciliation.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.2, 100.0, 100, 1000000, 50000000, 'CNPJ_FUNDO', 'CRITICAL', 'DT_COMPTC', 'HIGH', 'MEDIUM', 'VL_MERCADO', 'VL_PATRIM_LIQ', 'cda_df', 'cda_total', 'gap_pct', 'hidden_positions', 'informe_df', 'informe_pl', 'inner', 'severity', 'signal_type']

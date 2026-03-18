@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/market_data.py
-# hypothesis_version: 6.151.9
-
-[0.5, 10.0, 100, 1000, '=', 'CD_ATIVO', 'CNPJ_FUNDO', 'CRITICAL', 'Close', 'DECLARED_PRICE', 'DIVERGENCE_ABS', 'DIVERGENCE_PCT', 'DT_COMPTC', 'FRAUD_FLAG', 'HIGH', 'MARKET_PRICE', 'MEDIUM', 'OVERVALUATION', 'POSITION_VALUE', 'QT_POS', 'RESUMO', 'SEVERITY', 'UNDERVALUATION', 'VL_MERCADO', 'date', 'has_market_price', 'manipulation', 'price', 'price_cache.csv', 'price_validation.csv', 'ticker', 'validation']

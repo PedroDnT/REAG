@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/cross_fund_issuer.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.1, 0.3, 0.5, 1.0, 500, 'CD_ATIVO', 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CRITICAL', 'EMISSOR', 'HIGH', 'MEDIUM', 'VL_MERCADO', 'admin_total', 'cadastro_df', 'captive_admin', 'captive_issuer', 'cda_df', 'inner', 'num_admins', 'num_funds', 'nunique', 'pct_of_admin', 'severity', 'signal_type', 'sum', 'total_exposure', 'total_value']

@@ -1,4 +1,0 @@
-# file: /usr/lib/python3/dist-packages/pyparsing/helpers.py
-# hypothesis_version: 6.151.9
-
-[' | ', '#.*', '&(?P<entity>', '(', '(len) ', '(prev) ', ')', ');', '*/', ',', '.*', '...', '/', '// comment', '//(?:\\\\\\n|[^\\n])*', '/\\*(?:[^*]|\\*(?!/))*', ':', ';', '<', '<!--[\\s\\S]*?-->', '<%s>', '</', '</%s>', '=', '>', 'C style comment', 'C++ style comment', 'FollowedBy>', 'HTML comment', 'INDENT', 'Python style comment', 'UNINDENT', '_-:', '_:', '_original_end', '_original_start', 'any tag', 'arrayLen', 'common HTML entity', 'empty', 'end', 'illegal nesting', 'indented block', 'locn_end', 'locn_start', 'not a peer entry', 'not a subentry', 'not an unindent', 'rest of line', 'start', 'tag', 'value', '|']

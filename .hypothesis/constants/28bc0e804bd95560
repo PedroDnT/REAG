@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/utils/__init__.py
-# hypothesis_version: 6.151.9
-
-['CacheManager', 'ReportGenerator', 'validate_cnpj', 'validate_dataframe', 'validate_date']

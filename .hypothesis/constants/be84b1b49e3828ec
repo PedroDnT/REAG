@@ -1,4 +1,0 @@
-# file: /usr/lib/python3/dist-packages/pyparsing/results.py
-# hypothesis_version: 6.151.9
-
-['\n%s%s[%d]:\n%s%s%s', '\n{}{}[{}]:\n{}{}{}', ', ', 'ParseResults', '[', ']', '__', '_all_names', '_modal', '_name', '_parent', '_tokdict', '_toklist', 'default', 'tup']

@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/scripts/generate_public_report.py
-# hypothesis_version: 6.151.9
-
-['## Detailed Findings', '## Disclaimer', '## Executive Summary', '## Methodology', '--format', '--output', ';', 'CNPJ_FUNDO', 'DENOM_SOCIAL', 'FUND_ID', 'Z_', 'Z_SCORE', '__main__', 'anomalias_fluxo.csv', 'coerce', 'divergences', 'divergences_count', 'findings', 'float64', 'flow_anomalies', 'flow_anomalies_count', 'generation_date', 'high', 'htm', 'html', 'iso', 'json', 'low', 'markdown', 'md', 'medium', 'metadata', 'output_file', 'output_format', 'pl_drops', 'pl_drops_count', 'quedas_pl.csv', 'records', 'runs', 'runs_count', 'runs_resgate.csv', 'seconds', 'summary', 'title', 'total_anomalies', 'utf-8']

@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/base.py
-# hypothesis_version: 6.151.9
-
-['DataFrame', 'ERROR', 'INFO', 'SUCCESS', 'WARNING', 'analyzer', 'breakdown', 'csv', 'excel', 'json', 'records', 'timestamp', 'total_records']

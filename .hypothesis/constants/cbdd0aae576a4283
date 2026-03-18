@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/enrichment/exa_provider.py
-# hypothesis_version: 6.151.9
-
-[500, '30', 'EXA_API_KEY', 'EXA_BASE_URL', 'EXA_TIMEOUT_S', 'ExaProvider | None', 'application/json', 'content-type', 'content_text', 'contents', 'extracted_date', 'highlights', 'numResults', 'publishedDate', 'published_date', 'query', 'results', 'source', 'text', 'title', 'url', 'useAutoprompt', 'x-api-key']

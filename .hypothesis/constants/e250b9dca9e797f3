@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/explain/charts.py
-# hypothesis_version: 6.151.9
-
-[0.25, 1.2, 3.8, 150, '-', '.', 'ADMIN', 'AUM/PL (reported)', 'Agg', 'BRL', 'CNPJ_FUNDO', 'DT_COMPTC', 'Date', 'FLUXO_LIQ_DIA', 'FUND', 'Net flow (daily)', 'Quota value', 'VL_PATRIM_LIQ', 'VL_QUOTA', 'Value', '_', 'admin_cnpj', 'coerce', 'flowchart LR', 'fund_as_asset', 'held_by_funds', 'utf-8']

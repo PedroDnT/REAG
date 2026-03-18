@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/concentration.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.25, 0.3, 100, ', ', '=', 'CD_ATIVO', 'CNPJ_FUNDO', 'CRITICAL', 'DEFAULT', 'DT_COMPTC', 'EMISSOR', 'EQUITY', 'FIXED_INCOME', 'Fundo nao encontrado', 'HIGH', 'MEDIUM', 'MULTI_MARKET', 'REGULATORY_VIOLATION', 'RESUMO', 'VL_MERCADO', 'category', 'date', 'fraud_flag', 'fraud_flags', 'hhi', 'is_related', 'largest_position', 'num_positions', 'regulatory_limit_pct', 'related_issuers', 'related_party_pct', 'related_party_value', 'severity', 'top10_pct', 'top1_pct', 'top5_pct', 'violates_limit']

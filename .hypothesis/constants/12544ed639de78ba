@@ -1,4 +1,0 @@
-# file: /home/runner/work/REAG/REAG/src/analyzers/manager_network.py
-# hypothesis_version: 6.151.9
-
-[3.0, 4.0, 'CD_ATIVO', 'CNPJ_ADMIN', 'CNPJ_FUNDO', 'CNPJ_GESTOR', 'CRITICAL', 'DT_COMPTC', 'EMISSOR', 'HIGH', 'MEDIUM', 'VL_PATRIM_LIQ', 'admin_count', 'cadastro_df', 'emissor_digits', 'gestor_digits', 'inner', 'num_admins', 'num_funds', 'overlap_assets', 'severity', 'signal_type', 'total_aum', 'z_score']
