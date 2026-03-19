@@ -13,7 +13,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from config.settings import Config
-from scripts.run_investigation import build_parser, run_investigation, sanitize_run_id
+from scripts.run_investigation import build_parser, run_investigation
 
 InputFn = Callable[[str], str]
 PrintFn = Callable[[str], None]
@@ -123,16 +123,11 @@ def build_tui_args(*, input_fn: InputFn = input, print_fn: PrintFn = print) -> a
         print_fn=print_fn,
     )
 
-    raw_run_id = _prompt_text(
+    run_id = _prompt_text(
         "Run identifier",
         default=datetime.now().strftime("%Y%m%d_%H%M%S"),
         input_fn=input_fn,
     )
-    run_id = sanitize_run_id(raw_run_id)
-    if run_id != raw_run_id:
-        print_fn(
-            f"[warning] Run identifier {raw_run_id!r} is invalid; using {run_id!r} instead."
-        )
     output_dir = _prompt_optional_text("Output directory", input_fn=input_fn)
 
     values = vars(defaults).copy()

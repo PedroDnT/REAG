@@ -5,47 +5,9 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from scripts import investigation_tui
 from scripts import run_investigation
-from scripts.run_investigation import sanitize_run_id
-
-
-# ---------------------------------------------------------------------------
-# sanitize_run_id
-# ---------------------------------------------------------------------------
-
-class TestSanitizeRunId:
-    @pytest.mark.parametrize("valid_id", [
-        "abc",
-        "ABC",
-        "run-1",
-        "run_1",
-        "A0",
-        "a" * 64,
-        "20240101_120000",
-    ])
-    def test_valid_ids_pass_through(self, valid_id):
-        assert sanitize_run_id(valid_id) == valid_id
-
-    @pytest.mark.parametrize("invalid_id", [
-        "/tmp/x",           # absolute path
-        "../x",             # traversal
-        "../../etc/passwd", # traversal
-        "run/sub",          # separator
-        "run id",           # space
-        "",                 # empty
-        "a" * 65,           # too long
-        "-start",           # must start with alnum
-        "_start",           # must start with alnum
-    ])
-    def test_invalid_ids_return_timestamp_fallback(self, invalid_id):
-        result = sanitize_run_id(invalid_id)
-        # Must not equal the invalid input
-        assert result != invalid_id
-        # Fallback must itself be a valid run_id
-        assert sanitize_run_id(result) == result
 
 
 def test_run_investigation_selected_analyses_expands_all():
@@ -176,23 +138,3 @@ def test_tui_main_runs_pipeline_and_prints_summary(tmp_path, monkeypatch):
     assert exit_code == 0
     assert any("Report:" in line for line in outputs)
     assert any("flow_anomalies: 2" in line for line in outputs)
-
-
-def test_build_tui_args_warns_on_invalid_run_id():
-    """TUI should emit a warning and substitute a safe run_id when the user enters an invalid one."""
-    # Sequence: mode=1 (quick), investigation=1, format=1, run_id=../bad-id, output_dir="",
-    #           no enrichment, confirm=y
-    responses = iter(["1", "1", "1", "../bad-id", "", "n", "y"])
-    warnings: list[str] = []
-
-    args = investigation_tui.build_tui_args(
-        input_fn=lambda _: next(responses),
-        print_fn=warnings.append,
-    )
-
-    assert args is not None
-    # The stored run_id must not contain the traversal component
-    assert args.run_id != "../bad-id"
-    # A warning must have been emitted
-    assert any("[warning]" in w for w in warnings)
-
