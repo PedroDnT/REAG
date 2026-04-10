@@ -54,6 +54,16 @@ def sanitize_run_id(run_id: str) -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+def _normalize_selected_cnpjs(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    series = pd.Series(values, dtype="string")
+    cleaned = series.str.replace(r"\D", "", regex=True)
+    cleaned = cleaned.where(cleaned != "").dropna().str.zfill(14)
+    cleaned = cleaned.where(cleaned.str.len() == 14).dropna().drop_duplicates()
+    return cleaned.tolist()
+
+
 ANALYSIS_CHOICES = (
     "flow",
     "schemes",
@@ -410,6 +420,26 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
         if maybe:
             cda = processor.read_cda(maybe)
 
+    selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
+    if selected_cnpjs:
+        available_cnpjs: set[str] = set()
+        for frame in (cadastro, informe, cda):
+            if frame is None or frame.empty or "CNPJ_FUNDO" not in frame.columns:
+                continue
+            available_cnpjs.update(
+                _normalize_selected_cnpjs(frame["CNPJ_FUNDO"].dropna().astype(str).tolist())
+            )
+        missing = [cnpj for cnpj in selected_cnpjs if cnpj not in available_cnpjs]
+        if missing:
+            print(f"[warning] {len(missing)} selected funds not present in loaded data; continuing.")
+
+        if cadastro is not None and not cadastro.empty:
+            cadastro = processor.filter_by_cnpj(cadastro, selected_cnpjs)
+        if informe is not None and not informe.empty:
+            informe = processor.filter_by_cnpj(informe, selected_cnpjs)
+        if cda is not None and not cda.empty:
+            cda = processor.filter_by_cnpj(cda, selected_cnpjs)
+
     return LoadedData(cadastro=cadastro, informe=informe, cda=cda)
 
 
@@ -502,10 +532,16 @@ def _write_run_metadata(
     results: dict[str, pd.DataFrame],
     sources: dict[str, str],
 ) -> None:
+    selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
     meta = {
         "run_id": run_id,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "args": vars(args),
+        "scope": {
+            "fund_filter_enabled": bool(selected_cnpjs),
+            "selected_funds_count": len(selected_cnpjs),
+            "selected_cnpjs": selected_cnpjs,
+        },
         "outputs": {
             "sources": sources,
             "counts": {k: int(len(df)) for k, df in results.items()},

@@ -7,9 +7,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from config.settings import Config
 from scripts import investigation_tui
 from scripts import run_investigation
 from scripts.run_investigation import sanitize_run_id
+from src.processors.data_processor import DataProcessor
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ def test_run_investigation_respects_analysis_filter(tmp_path, monkeypatch):
             self.config = config
 
         def generate_anomaly_report(self, informe, cda_df=None):
-            return {"flow_anomalies": pd.DataFrame({"CNPJ_FUNDO": ["12345678000190"]})}
+            return {"flow_anomalies": informe[["CNPJ_FUNDO"]].drop_duplicates().reset_index(drop=True)}
 
     def should_not_be_called(*args, **kwargs):
         raise AssertionError("analysis outside the requested filter should not run")
@@ -81,7 +83,12 @@ def test_run_investigation_respects_analysis_filter(tmp_path, monkeypatch):
         "_load_data",
         lambda **kwargs: run_investigation.LoadedData(
             cadastro=pd.DataFrame({"placeholder": [1]}),
-            informe=pd.DataFrame({"CNPJ_FUNDO": ["12345678000190"], "DT_COMPTC": ["2024-01-01"]}),
+            informe=pd.DataFrame(
+                {
+                    "CNPJ_FUNDO": ["12345678000190", "99999999000199"],
+                    "DT_COMPTC": ["2024-01-01", "2024-01-01"],
+                }
+            ),
             cda=pd.DataFrame({"placeholder": [1]}),
         ),
     )
@@ -89,6 +96,7 @@ def test_run_investigation_respects_analysis_filter(tmp_path, monkeypatch):
     args = run_investigation.build_parser().parse_args(
         ["--analysis", "flow", "--no-explain", "--output-dir", str(tmp_path)]
     )
+    args.selected_cnpjs = ["12345678000190"]
 
     exit_code = run_investigation.run_investigation(args)
 
@@ -96,13 +104,105 @@ def test_run_investigation_respects_analysis_filter(tmp_path, monkeypatch):
     assert (tmp_path / "findings" / "flow_anomalies.csv").exists()
     assert (tmp_path / "summary.json").exists()
     assert not (tmp_path / "report.html").exists()
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["scope"]["fund_filter_enabled"] is True
+    assert summary["scope"]["selected_funds_count"] == 1
+
+
+def test_load_data_filters_selected_funds(tmp_path):
+    cadastro_path = tmp_path / "cad_fi_test.csv"
+    informe_path = tmp_path / "inf_diario_fi_test.csv"
+    cda_path = tmp_path / "cda_fi_test.csv"
+
+    pd.DataFrame(
+        {
+            "CNPJ_FUNDO": ["12345678000190", "99999999000199"],
+            "DENOM_SOCIAL": ["Fundo A", "Fundo B"],
+        }
+    ).to_csv(cadastro_path, sep=";", index=False)
+    pd.DataFrame(
+        {
+            "CNPJ_FUNDO": ["12345678000190", "99999999000199"],
+            "DT_COMPTC": ["2024-01-01", "2024-01-01"],
+            "VL_TOTAL": [1.0, 1.0],
+            "VL_QUOTA": [1.0, 1.0],
+            "VL_PATRIM_LIQ": [1.0, 1.0],
+            "CAPTC_DIA": [1.0, 1.0],
+            "RESG_DIA": [1.0, 1.0],
+            "NR_COTST": [1.0, 1.0],
+        }
+    ).to_csv(informe_path, sep=";", index=False)
+    pd.DataFrame(
+        {
+            "CNPJ_FUNDO": ["12345678000190", "99999999000199"],
+            "DT_COMPTC": ["2024-01-01", "2024-01-01"],
+            "VL_MERC_POS_FINAL": [1.0, 1.0],
+            "QT_POS_FINAL": [1.0, 1.0],
+            "VL_CUSTO_POS_FINAL": [1.0, 1.0],
+        }
+    ).to_csv(cda_path, sep=";", index=False)
+
+    args = argparse.Namespace(
+        cadastro=str(cadastro_path),
+        informe=str(informe_path),
+        cda=str(cda_path),
+        public_data_dir=str(tmp_path),
+        processed_data_dir=str(tmp_path),
+        selected_cnpjs=["12345678000190"],
+    )
+    loaded = run_investigation._load_data(
+        args=args,
+        config=Config(),
+        processor=DataProcessor(Config()),
+    )
+
+    assert loaded.cadastro is not None
+    assert loaded.informe is not None
+    assert loaded.cda is not None
+    assert loaded.cadastro["CNPJ_FUNDO"].tolist() == ["12345678000190"]
+    assert loaded.informe["CNPJ_FUNDO"].tolist() == ["12345678000190"]
+    assert loaded.cda["CNPJ_FUNDO"].tolist() == ["12345678000190"]
+
+
+def test_normalize_selected_cnpjs_drops_non_digits_inputs():
+    normalized = run_investigation._normalize_selected_cnpjs(["", "abc", "12.345.678/0001-90"])
+    assert normalized == ["12345678000190"]
+
+
+def test_load_data_no_false_missing_warning_with_processed_informe(tmp_path, capsys):
+    informe_processed = tmp_path / "reag_informe_diario_processed.csv"
+    pd.DataFrame(
+        {
+            "CNPJ_FUNDO": ["12.345.678/0001-90"],
+            "DT_COMPTC": ["2024-01-01"],
+        }
+    ).to_csv(informe_processed, sep=";", index=False)
+
+    args = argparse.Namespace(
+        cadastro=None,
+        informe=str(informe_processed),
+        cda=None,
+        public_data_dir=str(tmp_path),
+        processed_data_dir=str(tmp_path),
+        selected_cnpjs=["12345678000190"],
+    )
+
+    loaded = run_investigation._load_data(
+        args=args,
+        config=Config(),
+        processor=DataProcessor(Config()),
+    )
+    output = capsys.readouterr().out
+
+    assert "[warning]" not in output
+    assert loaded.informe is not None
+    assert loaded.informe["CNPJ_FUNDO"].tolist() == ["12.345.678/0001-90"]
 
 
 def test_build_tui_args_collects_custom_inputs():
     responses = iter(
         [
             "2",
-            "1",
             "1",
             "demo-run",
             "",
@@ -111,7 +211,10 @@ def test_build_tui_args_collects_custom_inputs():
             "",
             "/tmp/informe_processed.csv",
             "",
+            "1",
             "n",
+            "y",
+            "1",
             "y",
         ]
     )
@@ -129,6 +232,68 @@ def test_build_tui_args_collects_custom_inputs():
     assert args.public_data_dir == "/tmp/raw"
     assert args.processed_data_dir == "/tmp/processed"
     assert args.informe == "/tmp/informe_processed.csv"
+
+
+def test_build_tui_args_collects_selected_funds(monkeypatch):
+    monkeypatch.setattr(
+        investigation_tui,
+        "_load_fund_catalog",
+        lambda **kwargs: [
+            ("12345678000190", "Fundo Alpha"),
+            ("98765432000110", "Fundo Beta"),
+        ],
+    )
+    responses = iter(
+        [
+            "1",
+            "1",
+            "demo-run",
+            "",
+            "2",
+            "",
+            "1,2",
+            "done",
+            "n",
+            "y",
+            "3",
+            "y",
+        ]
+    )
+    args = investigation_tui.build_tui_args(
+        input_fn=lambda _: next(responses),
+        print_fn=lambda _: None,
+    )
+
+    assert args is not None
+    assert args.selected_cnpjs == ["12345678000190", "98765432000110"]
+    assert args.explain is True
+    assert args.explain_format == "both"
+
+
+def test_build_tui_args_empty_catalog_falls_back_to_all_funds(monkeypatch):
+    monkeypatch.setattr(investigation_tui, "_load_fund_catalog", lambda **kwargs: [])
+    outputs: list[str] = []
+    responses = iter(
+        [
+            "1",
+            "1",
+            "demo-run",
+            "",
+            "2",
+            "n",
+            "y",
+            "1",
+            "y",
+        ]
+    )
+    args = investigation_tui.build_tui_args(
+        input_fn=lambda _: next(responses),
+        print_fn=outputs.append,
+    )
+
+    assert args is not None
+    assert args.selected_cnpjs == []
+    assert any("No funds selected" in message for message in outputs)
 
 
 def test_tui_main_runs_pipeline_and_prints_summary(tmp_path, monkeypatch):
@@ -180,9 +345,7 @@ def test_tui_main_runs_pipeline_and_prints_summary(tmp_path, monkeypatch):
 
 def test_build_tui_args_warns_on_invalid_run_id():
     """TUI should emit a warning and substitute a safe run_id when the user enters an invalid one."""
-    # Sequence: mode=1 (quick), investigation=1, format=1, run_id=../bad-id, output_dir="",
-    #           no enrichment, confirm=y
-    responses = iter(["1", "1", "1", "../bad-id", "", "n", "y"])
+    responses = iter(["1", "1", "../bad-id", "", "1", "n", "y", "1", "y"])
     warnings: list[str] = []
 
     args = investigation_tui.build_tui_args(
@@ -195,4 +358,3 @@ def test_build_tui_args_warns_on_invalid_run_id():
     assert args.run_id != "../bad-id"
     # A warning must have been emitted
     assert any("[warning]" in w for w in warnings)
-
