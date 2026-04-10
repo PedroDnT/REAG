@@ -235,6 +235,32 @@ def test_build_tui_args_collects_selected_funds(monkeypatch):
     assert args.explain_format == "both"
 
 
+def test_build_tui_args_empty_catalog_falls_back_to_all_funds(monkeypatch):
+    monkeypatch.setattr(investigation_tui, "_load_fund_catalog", lambda **kwargs: [])
+    outputs: list[str] = []
+    responses = iter(
+        [
+            "1",
+            "1",
+            "demo-run",
+            "",
+            "2",
+            "n",
+            "y",
+            "1",
+            "y",
+        ]
+    )
+    args = investigation_tui.build_tui_args(
+        input_fn=lambda _: next(responses),
+        print_fn=outputs.append,
+    )
+
+    assert args is not None
+    assert args.selected_cnpjs == []
+    assert any("No funds selected" in message for message in outputs)
+
+
 def test_tui_main_runs_pipeline_and_prints_summary(tmp_path, monkeypatch):
     args = argparse.Namespace(
         run_id="demo-run",
