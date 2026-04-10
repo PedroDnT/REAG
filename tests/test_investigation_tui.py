@@ -164,6 +164,41 @@ def test_load_data_filters_selected_funds(tmp_path):
     assert loaded.cda["CNPJ_FUNDO"].tolist() == ["12345678000190"]
 
 
+def test_normalize_selected_cnpjs_drops_non_digits_inputs():
+    normalized = run_investigation._normalize_selected_cnpjs(["", "abc", "12.345.678/0001-90"])
+    assert normalized == ["12345678000190"]
+
+
+def test_load_data_no_false_missing_warning_with_processed_informe(tmp_path, capsys):
+    informe_processed = tmp_path / "reag_informe_diario_processed.csv"
+    pd.DataFrame(
+        {
+            "CNPJ_FUNDO": ["12.345.678/0001-90"],
+            "DT_COMPTC": ["2024-01-01"],
+        }
+    ).to_csv(informe_processed, sep=";", index=False)
+
+    args = argparse.Namespace(
+        cadastro=None,
+        informe=str(informe_processed),
+        cda=None,
+        public_data_dir=str(tmp_path),
+        processed_data_dir=str(tmp_path),
+        selected_cnpjs=["12345678000190"],
+    )
+
+    loaded = run_investigation._load_data(
+        args=args,
+        config=Config(),
+        processor=DataProcessor(Config()),
+    )
+    output = capsys.readouterr().out
+
+    assert "[warning]" not in output
+    assert loaded.informe is not None
+    assert loaded.informe["CNPJ_FUNDO"].tolist() == ["12.345.678/0001-90"]
+
+
 def test_build_tui_args_collects_custom_inputs():
     responses = iter(
         [

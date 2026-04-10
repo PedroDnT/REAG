@@ -58,7 +58,8 @@ def _normalize_selected_cnpjs(values: list[str] | None) -> list[str]:
     if not values:
         return []
     series = pd.Series(values, dtype="string")
-    cleaned = series.str.replace(r"\D", "", regex=True).str.zfill(14)
+    cleaned = series.str.replace(r"\D", "", regex=True)
+    cleaned = cleaned.where(cleaned != "").dropna().str.zfill(14)
     cleaned = cleaned.where(cleaned.str.len() == 14).dropna().drop_duplicates()
     return cleaned.tolist()
 
@@ -425,7 +426,9 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
         for frame in (cadastro, informe, cda):
             if frame is None or frame.empty or "CNPJ_FUNDO" not in frame.columns:
                 continue
-            available_cnpjs.update(frame["CNPJ_FUNDO"].dropna().astype(str).tolist())
+            available_cnpjs.update(
+                _normalize_selected_cnpjs(frame["CNPJ_FUNDO"].dropna().astype(str).tolist())
+            )
         missing = [cnpj for cnpj in selected_cnpjs if cnpj not in available_cnpjs]
         if missing:
             print(f"[warning] {len(missing)} selected funds not present in loaded data; continuing.")
