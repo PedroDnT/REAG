@@ -1,6 +1,12 @@
 # REAG Fraud Investigation Tools
 
-Ferramentas para análise de dados dos fundos da REAG (administradora investigada por fraude junto ao Banco Master).
+Ferramentas para análise de dados dos fundos da REAG (administradora e gestora investigada por fraude junto ao Banco Master).
+
+# MASTER 😉 Objective
+
+Prova C*ncpect, or MVS. Sim, sloppy code, CVM Dados Abertos não tratados e baixo rigor estatístico. Mas será que, mesmo assim, em quanto tempo eu conseguiria, se em uma semana com um iphone no LN de SP consegui levantar suspeitas, por que tantos anos para agirem ? 
+
+Está aí o resultado. Talvez tenhamos um pouco a melhorar.
 
 ## 🎯 Objetivo
 
@@ -103,6 +109,13 @@ Gera um relatório público agregando todas as anomalias detectadas:
 - Distribuição de severidade das anomalias
 - Detalhamento de achados (anonimizado)
 - Metodologia e disclaimer
+
+SUGERIDO:
+git stash 
+git reset --hard
+git filter-branch --force 
+
+git clean -fdx:
 
 ### 6. Assistente interativo no terminal
 
@@ -207,18 +220,7 @@ Para comparação detalhada de todos os métodos de detecção:
 - `reports/divergencias_flow_performance.csv`: Divergências
 - `reports/public_report.[md|html|json]`: Relatório público agregado
 
-## 🧪 Testes
 
-```bash
-# Todos os testes
-pytest tests/ -v
-
-# Com cobertura
-pytest tests/ --cov=src --cov-report=html
-
-# Teste específico
-pytest tests/test_anomaly_detector.py -v
-```
 
 ## ⚙️ Configuração
 
@@ -243,6 +245,7 @@ Edite `config/settings.py` para ajustar:
 3. Commit suas mudanças (`git commit -m 'feat: adiciona nova análise'`)
 4. Push para a branch (`git push origin feature/nova-analise`)
 5. Abra um Pull Request
+6. Stash * vorcarro.
 
 ## 📄 Licença
 
