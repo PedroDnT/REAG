@@ -99,10 +99,8 @@ python scripts/generate_public_report.py --format html --output meu_relatorio.ht
 ```
 
 Gera um relatório público agregando todas as anomalias detectadas:
-- Sumário executivo com estatísticas
-- Distribuição de severidade das anomalias
-- Detalhamento de achados (anonimizado)
-- Metodologia e disclaimer
+- Página HTML simples com métodos e resultados obtidos
+- Saída anonimizada para compartilhamento público
 
 ### 6. Assistente interativo no terminal
 
@@ -111,8 +109,14 @@ python scripts/investigation_tui.py
 ```
 
 O assistente em modo texto guia a escolha do foco da investigação, permite usar
-os caminhos padrão ou arquivos customizados, executa o pipeline correspondente e
-salva o relatório final em `reports/investigation/<run_id>/report.html`.
+os caminhos padrão ou arquivos customizados, permite buscar fundos listados por
+nome/CNPJ e selecionar 1+ fundos, executa o pipeline correspondente e faz uma
+pergunta final para gerar (ou não) o relatório.
+
+## 🔁 CI/CD
+
+- **CI**: pipeline automático para instalar dependências e rodar testes (`pytest`)
+- **CD**: pipeline para gerar relatório público HTML e publicar como artifact
 
 ### 7. Automação de fluxo com Playwright
 

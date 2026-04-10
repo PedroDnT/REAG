@@ -201,10 +201,9 @@ def test_generate_html_report(generator_with_data):
     assert '<title>REAG Fraud Investigation - Public Report</title>' in html
     
     # Check content is present
-    assert 'Executive Summary' in html
+    assert 'Results Obtained' in html
     assert '13' in html  # total_anomalies
-    assert 'Methodology' in html
-    assert 'Disclaimer' in html
+    assert 'Methods' in html
 
 
 def test_generate_report_markdown(generator_with_data):

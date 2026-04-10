@@ -253,13 +253,11 @@ class HtmlRenderer(ReportRenderer):
     <h1>{title}</h1>
     <p class="muted">Generated: {data.metadata.generation_date}</p>
 
-    <h2>Executive Summary</h2>
+    <h2>Results Obtained</h2>
     <div class="cards">
       <div class="card"><div class="metric">{total}</div><div>Total anomalies</div></div>
       <div class="card"><div class="metric">{funds}</div><div>Unique funds affected</div></div>
     </div>
-
-    <h2>Detailed Findings</h2>
     <ul>
       <li>Flow anomalies: {data.detailed_findings.flow_anomalies_count}</li>
       <li>PL drops: {data.detailed_findings.pl_drops_count}</li>
@@ -267,14 +265,9 @@ class HtmlRenderer(ReportRenderer):
       <li>Flow/performance divergences: {data.detailed_findings.divergences_count}</li>
     </ul>
 
-    <h2>Methodology</h2>
+    <h2>Methods</h2>
     <p>
       {data.methodology_text}
-    </p>
-
-    <h2>Disclaimer</h2>
-    <p>
-      {data.disclaimer_text}
     </p>
   </body>
 </html>
@@ -615,4 +608,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
