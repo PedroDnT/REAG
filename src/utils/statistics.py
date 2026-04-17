@@ -33,7 +33,7 @@ def calculate_z_scores(series: pd.Series,
         mean = series.mean()
         std = series.std()
         if std == 0:
-            return pd.Series(0, index=series.index)
+            return pd.Series(np.nan, index=series.index)
         return (series - mean) / std
 
 
