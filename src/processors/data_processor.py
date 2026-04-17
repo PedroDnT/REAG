@@ -297,3 +297,72 @@ class DataProcessor:
         df.to_csv(output_path, index=False, encoding='utf-8', sep=';')
         logger.info(f"Dados salvos em: {output_path}")
         return output_path
+
+    def filter_by_fund_list(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+        """
+        Filter DataFrame by fund CNPJ list.
+
+        Alias for filter_by_cnpj for consistency with new fund selector terminology.
+
+        Args:
+            df: DataFrame to filter
+            cnpj_list: List of fund CNPJs
+
+        Returns:
+            Filtered DataFrame
+        """
+        return self.filter_by_cnpj(df, cnpj_list)
+
+    def get_fund_metadata(self, cadastro_df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+        """
+        Extract fund metadata for specified CNPJs.
+
+        Args:
+            cadastro_df: Cadastro DataFrame
+            cnpj_list: List of fund CNPJs
+
+        Returns:
+            DataFrame with fund metadata (name, status, administrator, etc.)
+        """
+        filtered = self.filter_by_cnpj(cadastro_df, cnpj_list)
+
+        # Select relevant columns if they exist
+        metadata_cols = ['CNPJ_FUNDO', 'DENOM_SOCIAL', 'SIT', 'CNPJ_ADMIN', 'ADMIN',
+                        'CNPJ_GESTOR', 'GESTOR', 'TP_FUNDO', 'CLASSE']
+        available_cols = [col for col in metadata_cols if col in filtered.columns]
+
+        if available_cols:
+            return filtered[available_cols].copy()
+        return filtered
+
+    def merge_fund_metadata(self, df: pd.DataFrame, cadastro_df: pd.DataFrame,
+                           cols_to_merge: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        Enrich DataFrame with fund metadata from cadastro.
+
+        Args:
+            df: DataFrame to enrich (must have CNPJ_FUNDO column)
+            cadastro_df: Cadastro DataFrame with fund metadata
+            cols_to_merge: Specific columns to merge. If None, merges common useful columns.
+
+        Returns:
+            Enriched DataFrame with metadata
+        """
+        if 'CNPJ_FUNDO' not in df.columns or 'CNPJ_FUNDO' not in cadastro_df.columns:
+            logger.warning("CNPJ_FUNDO column missing, cannot merge metadata")
+            return df.copy()
+
+        # Default columns to merge
+        if cols_to_merge is None:
+            cols_to_merge = ['DENOM_SOCIAL', 'SIT', 'ADMIN', 'GESTOR']
+
+        # Filter to only available columns
+        available_cols = ['CNPJ_FUNDO'] + [col for col in cols_to_merge if col in cadastro_df.columns]
+
+        # Prepare cadastro subset
+        cadastro_subset = cadastro_df[available_cols].drop_duplicates('CNPJ_FUNDO')
+
+        # Merge
+        result = df.merge(cadastro_subset, on='CNPJ_FUNDO', how='left', suffixes=('', '_metadata'))
+
+        return result
