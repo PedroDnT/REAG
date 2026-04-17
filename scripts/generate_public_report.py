@@ -360,10 +360,11 @@ class PublicReportGenerator:
                 df = pd.read_csv(path, sep=";")
                 required = expected_columns.get(filename, set())
                 if not df.empty and required and not required.issubset(set(df.columns)):
+                    missing_columns = sorted(required - set(df.columns))
                     LOGGER.error(
                         "Failed to parse CSV file %s: missing required columns %s",
                         path,
-                        sorted(required),
+                        missing_columns,
                     )
                     return pd.DataFrame()
                 return df
