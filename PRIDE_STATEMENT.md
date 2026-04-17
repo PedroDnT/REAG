@@ -1,4 +1,4 @@
-## Por que me orgulho de ter construído isso com o Claude Code
+# Por que me orgulho de ter construído isso com o Claude Code
 
 ⚠️ **Disclaimer**
 
