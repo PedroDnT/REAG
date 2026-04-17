@@ -1,13 +1,16 @@
-"""REAG Public Report Generator - Refactored Architecture.
+"""Public Report Generator - Refactored Architecture.
 
-This module generates public-facing (anonymized) REAG investigation reports
+This module generates public-facing (anonymized) fraud investigation reports
 in multiple formats (Markdown, HTML, JSON). The refactored architecture
 separates data preparation from presentation using a unified ReportData
 dataclass and format-specific renderers.
 
+The generator is now flexible and works with any fund investigation, not just
+REAG-specific cases. The investigation name is configurable via settings.
+
 Architecture:
     1. Data Model: Immutable ReportData dataclass captures all report content
-    2. Renderers: Format-specific classes (MarkdownRenderer, HtmlRenderer, 
+    2. Renderers: Format-specific classes (MarkdownRenderer, HtmlRenderer,
        JsonRenderer) transform ReportData into target formats
     3. Generator: PublicReportGenerator orchestrates the workflow
 
@@ -16,18 +19,19 @@ Usage Examples:
         >>> generator = PublicReportGenerator()
         >>> content = generator.generate_report(output_format="markdown")
         >>> print(content)
-    
+
     Generate HTML report to file:
         >>> generator = PublicReportGenerator()
         >>> content = generator.generate_report(
         ...     output_format="html",
         ...     output_file="reports/public_report.html"
         ... )
-    
+
     Generate JSON report with custom config:
         >>> from config.settings import Config
         >>> config = Config()
         >>> config.REPORTS_DIR = "custom/reports/path"
+        >>> config.INVESTIGATION_NAME = "MyFund"
         >>> generator = PublicReportGenerator(config=config)
         >>> content = generator.generate_report(output_format="json")
 
@@ -37,6 +41,7 @@ Benefits:
     - Adding new formats requires only ~50 lines per renderer
     - Improved testability (data separate from presentation)
     - Type-safe with explicit annotations
+    - Flexible for any fund investigation, not just REAG
 """
 from __future__ import annotations
 
@@ -318,7 +323,12 @@ class JsonRenderer(ReportRenderer):
 
 
 class PublicReportGenerator:
-    """Generate public-facing (anonymized) REAG investigation reports."""
+    """Generate public-facing (anonymized) fraud investigation reports.
+
+    This generator creates anonymized reports for any fund investigation,
+    not just REAG-specific cases. The investigation name is configurable
+    via config.INVESTIGATION_NAME.
+    """
 
     def __init__(self, config: Config | None = None):
         self.config = config or Config()
@@ -462,8 +472,9 @@ class PublicReportGenerator:
                 raise KeyError(f"Severity distribution missing required key: {key}")
         
         # Extract metadata
+        investigation_name = getattr(self.config, 'INVESTIGATION_NAME', 'REAG')
         metadata = ReportMetadata(
-            title="REAG Fraud Investigation - Public Report",
+            title=f"{investigation_name} Fraud Investigation - Public Report",
             generation_date=summary["generation_date"],
         )
         
