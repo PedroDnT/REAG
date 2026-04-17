@@ -23,6 +23,7 @@ class AnomalyDetector(BaseAnalyzer):
         self.config = config or Config()
 
     def calculate_z_scores(self, series: pd.Series, robust: bool = False) -> pd.Series:
+        """Wrapper for z-score calculation utility."""
         return calculate_z_scores(series, robust=robust)
 
     def analyze(self, df: pd.DataFrame, cda_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:

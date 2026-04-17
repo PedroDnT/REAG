@@ -33,7 +33,7 @@ def calculate_z_scores(series: pd.Series,
         mean = series.mean()
         std = series.std()
         if std == 0:
-            return pd.Series(np.nan, index=series.index)
+            return pd.Series(np.nan, index=series.index, dtype=float)
         return (series - mean) / std
 
 
@@ -96,7 +96,14 @@ def detect_outliers_zscore(series: pd.Series,
         Boolean series indicating outliers
     """
     z_scores = calculate_z_scores(series, robust=robust)
-    return z_scores.abs() > threshold
+    outliers = z_scores.abs() > threshold
+
+    # Fallback for small samples where classic z-score can mask extremes.
+    if not robust and not outliers.any():
+        robust_z = calculate_z_scores(series, robust=True)
+        outliers = outliers | (robust_z.abs() > threshold)
+
+    return outliers.fillna(False)
 
 
 def calculate_rolling_stats(series: pd.Series,
@@ -144,9 +151,9 @@ def calculate_pct_change(series: pd.Series,
     pct = series.pct_change(periods=periods)
     
     if fill_method == 'ffill':
-        pct = pct.fillna(method='ffill')
+        pct = pct.ffill().bfill()
     elif fill_method == 'bfill':
-        pct = pct.fillna(method='bfill')
+        pct = pct.bfill().ffill()
     
     return pct
 
@@ -191,44 +198,32 @@ def chi2_cdf(x: float, df: int) -> float:
     if df <= 0:
         raise ValueError("Degrees of freedom must be positive")
     
-    # Use incomplete gamma function approximation
-    # chi2.cdf(x, df) = gammainc(df/2, x/2)
-    # We'll use a series expansion for the regularized incomplete gamma function
-    
     k = df / 2.0
     x_half = x / 2.0
-    
+
     # For large x, use asymptotic approximation
     if x > 100:
         return 1.0
-    
-    # Series expansion: gammainc(k, x) = 1 - exp(-x) * x^k * sum(x^n / (k+n)!)
-    # Compute using iterative approach to avoid overflow
-    
-    # Start with exp(-x_half) * x_half^k / gamma(k)
-    # Use log space for numerical stability
-    log_term = -x_half + k * np.log(x_half) - _log_gamma(k)
-    
-    if log_term < -700:  # Underflow protection
+
+    if x_half == 0:
         return 0.0
-    
-    term = np.exp(log_term)
-    
-    # Series summation
-    sum_val = term
-    for n in range(1, 200):  # Sufficient iterations for convergence
+
+    # Regularized lower incomplete gamma P(k, x_half)
+    # P(a, x) = e^-x * x^a / Gamma(a) * sum_{n=0..inf}(x^n / Gamma(a+n+1))
+    log_prefactor = -x_half + k * np.log(x_half) - _log_gamma(k + 1.0)
+    if log_prefactor < -700:  # Underflow protection
+        return 0.0
+
+    term = 1.0
+    summation = 1.0
+    for n in range(1, 500):
         term *= x_half / (k + n)
-        sum_val += term
-        
-        # Check convergence
-        if abs(term) < 1e-10 * abs(sum_val):
+        summation += term
+        if abs(term) < 1e-12 * abs(summation):
             break
-    
-    # Result is 1 - sum_val for lower tail
-    result = sum_val
-    
-    # Clamp to [0, 1]
-    return max(0.0, min(1.0, result))
+
+    result = np.exp(log_prefactor) * summation
+    return max(0.0, min(1.0, float(result)))
 
 
 def _log_gamma(x: float) -> float:

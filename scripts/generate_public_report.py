@@ -258,11 +258,13 @@ class HtmlRenderer(ReportRenderer):
     <h1>{title}</h1>
     <p class="muted">Generated: {data.metadata.generation_date}</p>
 
-    <h2>Results Obtained</h2>
+    <h2>Executive Summary</h2>
+    <p class="muted">Results Obtained</p>
     <div class="cards">
       <div class="card"><div class="metric">{total}</div><div>Total anomalies</div></div>
       <div class="card"><div class="metric">{funds}</div><div>Unique funds affected</div></div>
     </div>
+    <h2>Detailed Findings</h2>
     <ul>
       <li>Flow anomalies: {data.detailed_findings.flow_anomalies_count}</li>
       <li>PL drops: {data.detailed_findings.pl_drops_count}</li>
@@ -270,9 +272,14 @@ class HtmlRenderer(ReportRenderer):
       <li>Flow/performance divergences: {data.detailed_findings.divergences_count}</li>
     </ul>
 
-    <h2>Methods</h2>
+    <h2>Methodology</h2>
+    <p class="muted">Methods</p>
     <p>
       {data.methodology_text}
+    </p>
+    <h2>Disclaimer</h2>
+    <p>
+      {data.disclaimer_text}
     </p>
   </body>
 </html>
@@ -337,6 +344,12 @@ class PublicReportGenerator:
     def load_anomaly_reports(self) -> dict[str, pd.DataFrame]:
         """Load expected anomaly CSVs from `config.REPORTS_DIR`."""
         reports_dir = Path(self.config.REPORTS_DIR)
+        expected_columns = {
+            self.paths.flow_anomalies: {"CNPJ_FUNDO", "DT_COMPTC", "FLUXO_LIQ_DIA"},
+            self.paths.pl_drops: {"CNPJ_FUNDO", "DT_COMPTC", "VL_PATRIM_LIQ"},
+            self.paths.runs: {"CNPJ_FUNDO", "DT_COMPTC", "FLUXO_LIQ_DIA"},
+            self.paths.divergences: {"CNPJ_FUNDO", "DT_COMPTC"},
+        }
 
         def load_csv(filename: str) -> pd.DataFrame:
             path = reports_dir / filename
@@ -344,7 +357,17 @@ class PublicReportGenerator:
                 LOGGER.warning(f"Missing anomaly CSV file: {path}")
                 return pd.DataFrame()
             try:
-                return pd.read_csv(path, sep=";")
+                df = pd.read_csv(path, sep=";")
+                required = expected_columns.get(filename, set())
+                if not df.empty and required and not required.issubset(set(df.columns)):
+                    missing_columns = sorted(required - set(df.columns))
+                    LOGGER.error(
+                        "Failed to parse CSV file %s: missing required columns %s",
+                        path,
+                        missing_columns,
+                    )
+                    return pd.DataFrame()
+                return df
             except Exception as e:
                 LOGGER.error(f"Failed to parse CSV file {path}: {e}")
                 return pd.DataFrame()

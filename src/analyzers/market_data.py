@@ -14,6 +14,16 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import time
 
+try:
+    import yfinance as yf
+except Exception:  # pragma: no cover
+    class _YFinanceStub:
+        @staticmethod
+        def download(*args, **kwargs):
+            raise ImportError("yfinance not installed")
+
+    yf = _YFinanceStub()
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,7 +96,7 @@ class MarketDataValidator:
 
         # Tentar Yahoo Finance
         try:
-            price = self._fetch_yahoo_price(ticker, date)
+            price = self._fetch_price_yahoo(ticker, date)
             if price is not None:
                 self.price_cache[cache_key] = price
                 return price
@@ -94,6 +104,18 @@ class MarketDataValidator:
             logger.warning(f"Erro ao buscar {ticker} em {date}: {e}")
 
         return None
+
+    def get_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+        """Backward-compatible alias for get_market_price."""
+        return self.get_market_price(ticker, date)
+
+    def _convert_to_yahoo_ticker(self, ticker: str) -> str:
+        """Convert B3 ticker to Yahoo format."""
+        return ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+
+    def _fetch_price_yahoo(self, ticker: str, date: datetime.date) -> Optional[float]:
+        """Backward-compatible alias for Yahoo fetch method."""
+        return self._fetch_yahoo_price(ticker, date)
 
     def _fetch_yahoo_price(self, ticker: str, date: datetime.date) -> Optional[float]:
         """
@@ -107,34 +129,68 @@ class MarketDataValidator:
             Preço de fechamento ou None
         """
         try:
-            import yfinance as yf
-
-            # Adicionar .SA para ações brasileiras
-            yahoo_ticker = f"{ticker}.SA"
+            yahoo_ticker = self._convert_to_yahoo_ticker(ticker)
 
             # Buscar histórico
             start_date = date
             end_date = date + timedelta(days=1)
-
-            stock = yf.Ticker(yahoo_ticker)
-            hist = stock.history(start=start_date, end=end_date)
+            hist = yf.download(yahoo_ticker, start=start_date, end=end_date, progress=False)
 
             if not hist.empty:
-                return hist['Close'].iloc[0]
+                return float(hist['Close'].iloc[0])
 
             # Tentar dia anterior (caso mercado fechado)
             start_date = date - timedelta(days=3)
-            hist = stock.history(start=start_date, end=end_date)
+            hist = yf.download(yahoo_ticker, start=start_date, end=end_date, progress=False)
 
             if not hist.empty:
-                return hist['Close'].iloc[-1]
-
-        except ImportError:
-            logger.warning("yfinance not installed. Run: pip install yfinance")
+                return float(hist['Close'].iloc[-1])
         except Exception as e:
+            if isinstance(e, ImportError):
+                logger.warning("yfinance not installed. Run: pip install yfinance")
+                return None
             logger.debug("Could not fetch price for %s on %s: %s", ticker, date, e)
 
         return None
+
+    def validate(self, portfolio_df: pd.DataFrame) -> pd.DataFrame:
+        """Backward-compatible portfolio validation API used by tests."""
+        required_cols = ['ticker', 'declared_price', 'quantity', 'date']
+        missing = [col for col in required_cols if col not in portfolio_df.columns]
+        if missing:
+            raise ValueError(f"Colunas faltando: {missing}")
+
+        if portfolio_df.empty:
+            return portfolio_df.copy()
+
+        result = portfolio_df.copy()
+        result['date'] = pd.to_datetime(result['date']).dt.date
+        result['market_price'] = [
+            self.get_price(row.ticker, row.date) for row in result.itertuples(index=False)
+        ]
+        result['price_deviation_pct'] = np.where(
+            result['market_price'].notna() & (result['market_price'] != 0),
+            ((result['declared_price'] - result['market_price']) / result['market_price']) * 100,
+            np.nan,
+        )
+        return result
+
+    def detect_anomalies(self, validated_df: pd.DataFrame, threshold: float = 5.0) -> pd.DataFrame:
+        """Backward-compatible anomaly detection API used by tests."""
+        if validated_df.empty:
+            return validated_df.copy()
+        return validated_df[validated_df['price_deviation_pct'].abs() > threshold].copy()
+
+    def generate_report(self, validated_df: pd.DataFrame) -> Dict[str, object]:
+        """Backward-compatible reporting API used by tests."""
+        anomalies = self.detect_anomalies(validated_df)
+        return {
+            'summary': {
+                'total_assets': int(len(validated_df)),
+                'anomalies': int(len(anomalies)),
+            },
+            'total_assets': int(len(validated_df)),
+        }
 
     def validate_portfolio_prices(self, cda_df: pd.DataFrame,
                                   sample_size: Optional[int] = None) -> pd.DataFrame:

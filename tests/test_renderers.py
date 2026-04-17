@@ -361,12 +361,12 @@ def severity_distribution_strategy():
 def anonymized_datasets_strategy():
     """Strategy for generating AnonymizedDatasets instances."""
     # Generate simple DataFrames with FUND_ID and VALUE columns
-    fund_id_column = column("FUND_ID", elements=st.text(
+    fund_id_column = column("FUND_ID", dtype="object", elements=st.text(
         alphabet="FUND_0123456789",
         min_size=9,
         max_size=9
     ))
-    value_column = column("VALUE", elements=st.integers(min_value=0, max_value=1000000))
+    value_column = column("VALUE", dtype="int64", elements=st.integers(min_value=0, max_value=1000000))
     
     df_strategy = st.one_of(
         st.just(pd.DataFrame()),  # Empty DataFrame
