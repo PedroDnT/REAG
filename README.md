@@ -1,6 +1,8 @@
-# REAG Fraud Investigation Tools
+# Brazilian Fund Fraud Investigation Tools
 
-Ferramentas para análise de dados dos fundos da REAG (administradora e gestora investigada por fraude junto ao Banco Master).
+Ferramentas flexíveis para análise de fraudes em fundos de investimento brasileiros usando dados públicos da CVM.
+
+**Exemplo de Uso:** Originalmente desenvolvido para investigar fundos da REAG (administradora investigada por fraude junto ao Banco Master), mas funciona com qualquer fundo ou administradora.
 
 # MASTER 😉 Objective
 
@@ -10,12 +12,18 @@ Está aí o resultado. Talvez tenhamos um pouco a melhorar.
 
 ## 🎯 Objetivo
 
-Identificar irregularidades e padrões suspeitos nos fundos administrados pela REAG através de:
+Identificar irregularidades e padrões suspeitos em fundos de investimento através de:
 
 1. **Análise de fluxos**: Captação/resgate anormais
 2. **Análise de carteira**: Concentração e mudanças bruscas
 3. **Detecção de anomalias**: Z-scores, runs, divergências
 4. **Visualizações**: Gráficos temporais e distribuições
+
+**Flexibilidade:** Analise fundos por:
+- Administradora (ex: "REAG DTVM", "XYZ Administradora")
+- Gestora (ex: "ABC Gestora")
+- Lista específica de CNPJs
+- Todo o mercado (comparação de pares)
 
 ## 📊 Fontes de Dados
 
@@ -52,6 +60,21 @@ pytest tests/ -v
 
 ## 📚 Uso
 
+### Modo Rápido: Interface Interativa
+
+```bash
+# Assistente interativo no terminal
+python scripts/investigation_tui.py
+```
+
+O assistente guia você através de:
+1. Escolha do foco de investigação (fluxos, carteira, networks, completo)
+2. Seleção de fundos (por nome, CNPJ, administradora, etc.)
+3. Execução do pipeline de análise
+4. Geração opcional de relatórios
+
+### Modo Avançado: Passo a Passo
+
 ### 1. Coletar Dados
 
 ```bash
@@ -60,13 +83,22 @@ jupyter lab notebooks/01_data_collection.ipynb
 
 Baixa dados da CVM (Informe Diário, CDA, Cadastro) para o período configurado.
 
-### 2. Identificar Fundos REAG
+### 2. Identificar Fundos Alvo
 
 ```bash
-jupyter lab notebooks/02_identify_reag_funds.ipynb
+jupyter lab notebooks/02_identify_target_funds.ipynb
 ```
 
-Identifica fundos administrados/geridos pela REAG através do cadastro da CVM.
+Identifica fundos para investigação através do cadastro da CVM. Suporta:
+- Busca por administradora (ex: "REAG", "XYZ DTVM")
+- Busca por gestora
+- Lista explícita de CNPJs
+- Todos os fundos (para benchmarking)
+
+**Configuração:** Edite `config/settings.py` para definir:
+- `TARGET_FUND_MODE`: "administrator", "manager", "fund_list", "all"
+- `TARGET_IDENTIFIER`: Nome da administradora/gestora
+- `INVESTIGATION_NAME`: Nome para relatórios (ex: "REAG", "MyFund")
 
 ### 3. Análise de Fluxos
 
@@ -74,7 +106,7 @@ Identifica fundos administrados/geridos pela REAG através do cadastro da CVM.
 jupyter lab notebooks/03_flow_analysis.ipynb
 ```
 
-Analisa captação, resgate e fluxo líquido dos fundos REAG.
+Analisa captação, resgate e fluxo líquido dos fundos selecionados.
 
 ### 4. Detecção de Anomalias
 
