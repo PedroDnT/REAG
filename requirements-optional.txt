@@ -1,0 +1,19 @@
+# Optional dependencies for external data providers.
+#
+#   pip install -r requirements-optional.txt
+#
+# Nothing here is required to run an investigation. Each analyzer that depends
+# on one of these degrades gracefully when it is absent.
+
+# Market prices for src/analyzers/market_data.py (MarketDataValidator).
+#
+# Deliberately optional. yfinance scrapes Yahoo Finance's undocumented
+# endpoints: it has no SLA, breaks when Yahoo changes its auth flow, and is
+# rate-limited. It also only covers B3-listed equities and ETFs, while CDA
+# holdings are dominated by unlisted credit (CRI, CRA, debentures, cotas de
+# fundos) -- precisely the assets where mismarking is most likely.
+#
+# For price manipulation, prefer the offline detector in
+# src/analyzers/price_divergence.py, which compares the same asset's declared
+# unit price across funds using only CVM filings.
+yfinance>=0.2.40

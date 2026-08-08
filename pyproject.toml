@@ -5,4 +5,29 @@ addopts = "-v --tb=short"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks integration tests requiring network or filesystem",
+    "eval: detection-quality evaluations measuring precision/recall against labeled synthetic fraud",
 ]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["notebooks", "docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "B",    # flake8-bugbear (mutable defaults, etc.)
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter, not enforced here
+    "B008",  # function call in default arg -- used intentionally for config defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import fixtures and helpers that ruff reads as unused, and re-import
+# inside test bodies to keep each test self-describing.
+"tests/**" = ["F401", "E402", "B011"]

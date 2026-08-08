@@ -3,7 +3,7 @@ Data validation utilities.
 """
 
 import pandas as pd
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 from datetime import datetime
 
 from src.utils.cnpj_utils import is_valid_cnpj, normalize_cnpj

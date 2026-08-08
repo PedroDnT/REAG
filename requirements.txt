@@ -1,28 +1,19 @@
-# requirements.txt
-# Core data processing
+# Core runtime dependencies.
+#
+# Everything the analyzers, collectors and report generators import. Keep this
+# file minimal: it is what CI installs and what a user needs to run an
+# investigation. See requirements-dev.txt (tests, lint), requirements-optional.txt
+# (external data providers) and requirements-notebooks.txt (Jupyter).
+
+# Data processing
 pandas>=2.0.0
 numpy>=1.24.0
 requests>=2.31.0
 
-# Jupyter
-jupyterlab>=4.0.0
-ipykernel>=6.25.0
-
-# Visualization
+# Charting for Benford plots and per-fund brief charts
+# (src/analyzers/benford_law.py, src/explain/charts.py)
 matplotlib>=3.7.0
-seaborn>=0.12.0
-plotly>=5.14.0
-
-# Statistical analysis
-statsmodels>=0.14.0
-
-# Testing
-pytest>=7.4.0
-pytest-cov>=4.1.0
-hypothesis>=6.92.0
 
 # Utilities
 python-dateutil>=2.8.0
 tqdm>=4.65.0
-tabulate>=0.9.0
-playwright>=1.44.0
