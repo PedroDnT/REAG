@@ -431,6 +431,45 @@ SIGNAL_REGISTRY: dict[str, SignalDefinition] = {
         ),
         severity_rule=lambda row: _severity_from_named_column(row),
     ),
+    "cross_fund_price_divergence": SignalDefinition(
+        finding_id="cross_fund_price_divergence",
+        title="Declared price diverges from peer funds",
+        plain_language_explanation=(
+            "Several funds held this same asset on this same date, and this fund declared a unit price "
+            "materially different from what its peers declared. Funds marking the same instrument on the "
+            "same day should agree; a fund that does not is either applying a different valuation "
+            "methodology or mismarking the position -- upward to support its NAV, or downward to defer "
+            "a loss. This comparison uses only the funds' own CVM filings, with no external price source."
+        ),
+        evidence_fields=(
+            "CD_ATIVO",
+            "declared_unit_price",
+            "consensus_unit_price",
+            "divergence_pct",
+            "robust_z",
+            "peer_fund_count",
+            "position_value",
+            "direction",
+            "severity",
+        ),
+        primary_entities=("FUND", "ASSET"),
+        next_steps=(
+            "Request the fund's valuation methodology and pricing source for this asset on this date.",
+            "Compare against the peer funds' own methodologies: a defensible difference should be documented.",
+            "For unlisted credit, request the independent valuation report and check who prepared it.",
+            "Check whether the divergence is systematic across the fund's portfolio or isolated to this asset.",
+        ),
+        caveats=(
+            "Different valuation methodologies can legitimately produce different marks for illiquid "
+            "assets, particularly around credit events or for instruments with different maturities "
+            "sharing one asset code.",
+            "The consensus is the median of the funds holding the asset; if most holders are related "
+            "parties, the consensus itself may be mismarked and an honest fund would appear divergent.",
+            "Positions acquired at different times may carry different amortized costs under some "
+            "accounting treatments.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
     "distributor_concentration_stub": SignalDefinition(
         finding_id="distributor_concentration_stub",
         title="Distributor concentration (placeholder)",

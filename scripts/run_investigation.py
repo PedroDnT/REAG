@@ -22,6 +22,7 @@ from src.analyzers.fraud_schemes import FraudSchemeDetector
 from src.analyzers.fund_lifecycle import FundLifecycleAnalyzer
 from src.analyzers.manager_network import ManagerNetworkAnalyzer
 from src.analyzers.portfolio_reconciliation import PortfolioReconciliationAnalyzer
+from src.analyzers.price_divergence import CrossFundPriceDivergenceAnalyzer
 from src.analyzers.quotaholder_analyzer import QuotaholderAnalyzer
 from src.analyzers.valuation_smoothing import ValuationSmoothingAnalyzer
 from src.analyzers.window_dressing import WindowDressingDetector
@@ -77,6 +78,7 @@ ANALYSIS_CHOICES = (
     "window_dressing",
     "valuation_smoothing",
     "cross_fund_issuer",
+    "price_divergence",
 )
 
 
@@ -184,6 +186,15 @@ def _analyzer_specs(config: Config) -> tuple[AnalyzerSpec, ...]:
                 "cross_fund_issuer": CrossFundIssuerAnalyzer(config=config).analyze(
                     _cda(d), d.cadastro
                 )
+            },
+        ),
+        AnalyzerSpec(
+            name="price_divergence",
+            is_runnable=lambda d: _has(d.cda, "CD_ATIVO", "DT_COMPTC", "QT_POS"),
+            run=lambda d: {
+                "cross_fund_price_divergence": CrossFundPriceDivergenceAnalyzer(
+                    config=config
+                ).analyze(_cda(d))
             },
         ),
     )
