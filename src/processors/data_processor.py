@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Optional, List
 from config.settings import Config
+from src.utils.cnpj_utils import normalize_cnpj_list, normalize_cnpj_series
 
 logger = logging.getLogger(__name__)
 
@@ -70,53 +71,22 @@ class DataProcessor:
     def _normalize_cnpj_series(series: pd.Series) -> pd.Series:
         """Normaliza CNPJ removendo pontuação e preservando NAs.
 
-        Converte CNPJs para formato padronizado de 14 dígitos, removendo
-        pontuação e preenchendo com zeros à esquerda quando necessário.
-        CNPJs já formatados corretamente (14 dígitos numéricos) não são
-        reprocessados para melhor performance.
+        Delegado a src.utils.cnpj_utils, a unica fonte de verdade para CNPJ.
+        Valores que nao podem ser um CNPJ (vazios, sem digitos, com mais de 14
+        digitos) viram pd.NA em vez de um identificador sintetico.
 
         Args:
             series: Série pandas contendo CNPJs em diversos formatos
 
         Returns:
             Série pandas com CNPJs normalizados (14 dígitos) ou NAs preservados
-
-        Note:
-            Requer pandas >= 1.0.0 para suporte ao dtype 'string'.
-            O projeto atualmente requer pandas >= 2.0.0.
         """
-        # Convert to string type
-        str_series = series.astype('string')
-
-        # Check if values are already properly formatted (14 digits only)
-        # to avoid unnecessary reprocessing
-        is_already_formatted = (
-            str_series.str.match(r'^\d{14}$', na=False)
-        )
-
-        # Only process values that need normalization
-        needs_processing = ~is_already_formatted & str_series.notna()
-
-        result = str_series.copy()
-        if needs_processing.any():
-            # Remove non-digit characters and pad with zeros
-            to_process = str_series[needs_processing]
-            cleaned = to_process.str.replace(r'\D', '', regex=True)
-            # Filter out empty strings
-            cleaned = cleaned.where(cleaned.str.len() > 0)
-            # Pad with zeros to 14 digits
-            result[needs_processing] = cleaned.str.zfill(14)
-
-        return result
+        return normalize_cnpj_series(series)
 
     @classmethod
     def _normalize_cnpj_list(cls, cnpj_list: List[str]) -> List[str]:
         """Normaliza lista de CNPJs para comparação consistente."""
-        if not cnpj_list:
-            return []
-        series = pd.Series(cnpj_list, dtype='string')
-        normalized = cls._normalize_cnpj_series(series).dropna()
-        return normalized.tolist()
+        return normalize_cnpj_list(cnpj_list)
     def _read_csv_generic(self, 
                          file_path: Path,
                          file_type: str,

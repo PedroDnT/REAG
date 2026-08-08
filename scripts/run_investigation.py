@@ -28,6 +28,7 @@ from src.enrichment.exa_provider import ExaProvider
 from src.enrichment.interfaces import SearchResult
 from src.explain.explainer import Explainer
 from src.processors.data_processor import DataProcessor
+from src.utils.cnpj_utils import normalize_cnpj_list
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
@@ -55,13 +56,9 @@ def sanitize_run_id(run_id: str) -> str:
 
 
 def _normalize_selected_cnpjs(values: list[str] | None) -> list[str]:
-    if not values:
-        return []
-    series = pd.Series(values, dtype="string")
-    cleaned = series.str.replace(r"\D", "", regex=True)
-    cleaned = cleaned.where(cleaned != "").dropna().str.zfill(14)
-    cleaned = cleaned.where(cleaned.str.len() == 14).dropna().drop_duplicates()
-    return cleaned.tolist()
+    """Normalize user-supplied CNPJs, dropping duplicates and unusable values."""
+    normalized = normalize_cnpj_list(values or [])
+    return list(dict.fromkeys(normalized))
 
 
 ANALYSIS_CHOICES = (
