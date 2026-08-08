@@ -2,6 +2,7 @@ import logging
 
 import pandas as pd
 from pathlib import Path
+from typing import Any
 from config.settings import Config
 from src.utils.cnpj_utils import normalize_cnpj_list, normalize_cnpj_series
 
@@ -93,7 +94,9 @@ class DataProcessor:
                          sep: str = ';',
                          date_cols: list[str] | None = None,
                          cnpj_cols: list[str] | None = None,
-                         numeric_cols: list[str] | None = None) -> pd.DataFrame:
+                         numeric_cols: list[str] | None = None,
+                         usecols: list[str] | None = None,
+                         dtype: dict[str, Any] | None = None) -> pd.DataFrame:
         """
         Generic CSV reader with common transformations.
 
@@ -107,12 +110,19 @@ class DataProcessor:
             date_cols: List of date columns to parse
             cnpj_cols: List of CNPJ columns to normalize
             numeric_cols: List of numeric columns to coerce
+            usecols: Restrict parsing to these columns. CVM monthly files run to
+                hundreds of MB, so narrowing the read is the cheapest way to cut
+                memory. Defaults to None (read everything), because downstream
+                analyzers reach for columns beyond the ones normalized here.
+            dtype: Explicit dtypes, to skip pandas' type inference on wide files
 
         Returns:
             Processed DataFrame or empty DataFrame on error
         """
         try:
-            df = pd.read_csv(file_path, encoding=encoding, sep=sep)
+            df = pd.read_csv(
+                file_path, encoding=encoding, sep=sep, usecols=usecols, dtype=dtype
+            )
 
             # Padronizar nomes de colunas
             df = self._normalize_columns(df)

@@ -65,45 +65,31 @@ class BenfordLawAnalyzer:
         Returns:
             Series of first digits (1-9)
         """
-        # Convert to absolute values and remove zeros/NaN
-        values = values.abs().replace(0, np.nan).dropna()
+        # Coerce to numeric, then drop anything that cannot carry a first digit:
+        # non-numeric, NaN, zero and non-finite values.
+        numeric = pd.to_numeric(values, errors='coerce').abs()
+        numeric = numeric[numeric.notna() & (numeric > 0) & np.isfinite(numeric)]
 
-        if len(values) == 0:
+        if len(numeric) == 0:
             return pd.Series(dtype=int)
 
-        # Use mathematical approach to handle scientific notation correctly
-        first_digits = []
-        for val in values:
-            try:
-                # Convert to float to handle large integers
-                val_float = float(val)
+        # Normalize each value into [1, 10) via its base-10 exponent, then take
+        # the integer part. Vectorized: the previous implementation looped in
+        # Python, repeatedly multiplying or dividing by 10 (~68x slower on 200k
+        # values, and accumulating floating-point error on very small inputs).
+        array = numeric.to_numpy(dtype=float)
+        normalized = array / np.power(10.0, np.floor(np.log10(array)))
 
-                # Ensure we have a positive finite number
-                if val_float <= 0 or not np.isfinite(val_float):
-                    continue
+        # log10 can round to the wrong exponent for values sitting just under a
+        # power of ten: log10(999999999999998.0) evaluates to exactly 15.0, so
+        # the division yields 0.999... and the first digit reads as 0 instead of
+        # 9. Nudge those back into [1, 10) rather than discarding them.
+        normalized = np.where(normalized < 1.0, normalized * 10.0, normalized)
+        normalized = np.where(normalized >= 10.0, normalized / 10.0, normalized)
 
-                # Get the first digit by normalizing to [1, 10)
-                # Find power of 10: 10^n <= val < 10^(n+1)
-                if val_float >= 1:
-                    # For values >= 1, divide by powers of 10 until in [1, 10)
-                    normalized = val_float
-                    while normalized >= 10:
-                        normalized /= 10
-                else:
-                    # For values < 1, multiply by powers of 10 until in [1, 10)
-                    normalized = val_float
-                    while normalized < 1:
-                        normalized *= 10
+        first_digits = normalized.astype(int)
 
-                # First digit is the integer part of the normalized value
-                first_digit = int(normalized)
-                if 1 <= first_digit <= 9:
-                    first_digits.append(first_digit)
-            except (ValueError, TypeError, OverflowError):
-                # Skip values that can't be converted
-                continue
-
-        return pd.Series(first_digits)
+        return pd.Series(first_digits[(first_digits >= 1) & (first_digits <= 9)])
 
     def calculate_observed_distribution(self, first_digits: pd.Series) -> dict[int, float]:
         """

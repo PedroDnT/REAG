@@ -298,3 +298,92 @@ class TestBenfordLawAnalyzer:
         # Due to randomness, we just check it's not CRITICAL
         assert result['fraud_risk'] in ['LOW', 'MEDIUM', 'HIGH']
         assert result['fraud_risk'] != 'CRITICAL'
+
+
+# ---------------------------------------------------------------------------
+# extract_first_digits: vectorization equivalence
+# ---------------------------------------------------------------------------
+
+from hypothesis import given, settings, strategies as st
+
+
+def _reference_first_digits(values: pd.Series) -> pd.Series:
+    """The original per-value Python loop, kept as the equivalence oracle.
+
+    extract_first_digits was rewritten to use np.log10 instead of repeatedly
+    multiplying or dividing by 10. This is the implementation it replaced.
+    """
+    values = values.abs().replace(0, np.nan).dropna()
+    if len(values) == 0:
+        return pd.Series(dtype=int)
+    out = []
+    for val in values:
+        try:
+            v = float(val)
+            if v <= 0 or not np.isfinite(v):
+                continue
+            n = v
+            if v >= 1:
+                while n >= 10:
+                    n /= 10
+            else:
+                while n < 1:
+                    n *= 10
+            d = int(n)
+            if 1 <= d <= 9:
+                out.append(d)
+        except (ValueError, TypeError, OverflowError):
+            continue
+    return pd.Series(out)
+
+
+class TestExtractFirstDigitsEquivalence:
+
+    @pytest.fixture
+    def analyzer(self):
+        return BenfordLawAnalyzer()
+
+    @pytest.mark.parametrize("name,factory", [
+        ("lognormal", lambda r: r.lognormal(10, 3, 5000)),
+        ("uniform", lambda r: r.uniform(1, 1e6, 5000)),
+        ("sub_one", lambda r: r.uniform(1e-12, 1.0, 5000)),
+        ("very_large", lambda r: r.uniform(1e15, 1e20, 5000)),
+        ("negative", lambda r: r.uniform(-1e6, -1, 5000)),
+    ])
+    def test_matches_reference_across_magnitudes(self, analyzer, name, factory):
+        series = pd.Series(factory(np.random.default_rng(0)))
+        pd.testing.assert_series_equal(
+            analyzer.extract_first_digits(series).value_counts().sort_index(),
+            _reference_first_digits(series).value_counts().sort_index(),
+        )
+
+    def test_zeros_nan_and_infinities_are_dropped(self, analyzer):
+        series = pd.Series([0, 0.0, np.nan, np.inf, -np.inf, 5.0, -3.2, 9.99])
+        result = analyzer.extract_first_digits(series)
+        assert sorted(result.tolist()) == [3, 5, 9]
+
+    def test_empty_input(self, analyzer):
+        assert len(analyzer.extract_first_digits(pd.Series([], dtype=float))) == 0
+        assert len(analyzer.extract_first_digits(pd.Series([0, 0, np.nan]))) == 0
+
+    def test_exact_powers_of_ten(self, analyzer):
+        """Boundary values where a log10 rounding error would show up first."""
+        series = pd.Series([1e-6, 1e-3, 0.1, 1.0, 10.0, 100.0, 1e6, 1e15])
+        assert analyzer.extract_first_digits(series).tolist() == [1] * 8
+
+    def test_all_digits_representable(self, analyzer):
+        series = pd.Series([float(d) for d in range(1, 10)])
+        assert analyzer.extract_first_digits(series).tolist() == list(range(1, 10))
+
+    @given(st.lists(
+        st.floats(min_value=1e-15, max_value=1e15, allow_nan=False, allow_infinity=False),
+        max_size=200,
+    ))
+    @settings(max_examples=50, deadline=None)
+    def test_property_matches_reference(self, values):
+        series = pd.Series(values, dtype=float)
+        analyzer = BenfordLawAnalyzer()
+        assert (
+            analyzer.extract_first_digits(series).tolist()
+            == _reference_first_digits(series).tolist()
+        )
