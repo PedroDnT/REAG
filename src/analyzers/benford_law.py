@@ -78,12 +78,32 @@ class BenfordLawAnalyzer:
         # Python, repeatedly multiplying or dividing by 10 (~68x slower on 200k
         # values, and accumulating floating-point error on very small inputs).
         array = numeric.to_numpy(dtype=float)
-        normalized = array / np.power(10.0, np.floor(np.log10(array)))
+        magnitude = np.floor(np.log10(array))
 
-        # log10 can round to the wrong exponent for values sitting just under a
-        # power of ten: log10(999999999999998.0) evaluates to exactly 15.0, so
-        # the division yields 0.999... and the first digit reads as 0 instead of
-        # 9. Nudge those back into [1, 10) rather than discarding them.
+        # Scale by whichever of multiply/divide keeps the power of ten exactly
+        # representable. Below 1, multiplying by 10**-magnitude is exact where
+        # dividing by 10**magnitude is not (0.7 / 1e-1 is 6.999999999999999,
+        # which truncates to 6); at or above 1 the reverse holds (100000.0 *
+        # 1e-5 is 0.9999999999999999, which reads as 9). Truncation turns either
+        # half-ulp error into a whole-digit error.
+        normalized = np.where(
+            magnitude < 0,
+            array * np.power(10.0, -magnitude),
+            array / np.power(10.0, magnitude),
+        )
+
+        # Snap off residual error so a value that is a hair under an integer
+        # truncates up rather than down. 15 decimals is below double precision's
+        # ~16 significant digits, so this corrects representation noise without
+        # merging genuinely distinct values: 0.9999999999999999 (which is 1e-14
+        # scaled, first digit 1) rounds to 1.0, while 0.999999999999998 (which
+        # is 999999999999998.0 scaled, first digit 9) does not.
+        normalized = np.round(normalized, 15)
+
+        # log10 can still land on the wrong exponent for values sitting just
+        # under a power of ten -- log10(999999999999998.0) evaluates to exactly
+        # 15.0 -- putting the result outside [1, 10). Nudge those back in rather
+        # than discarding them.
         normalized = np.where(normalized < 1.0, normalized * 10.0, normalized)
         normalized = np.where(normalized >= 10.0, normalized / 10.0, normalized)
 

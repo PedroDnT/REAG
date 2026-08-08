@@ -307,33 +307,32 @@ class TestBenfordLawAnalyzer:
 from hypothesis import given, settings, strategies as st
 
 
-def _reference_first_digits(values: pd.Series) -> pd.Series:
-    """The original per-value Python loop, kept as the equivalence oracle.
+def _true_first_digit(value: float) -> int | None:
+    """First significant digit of the shortest decimal that round-trips.
 
-    extract_first_digits was rewritten to use np.log10 instead of repeatedly
-    multiplying or dividing by 10. This is the implementation it replaced.
+    The oracle for what extract_first_digits should return. Deliberately not the
+    per-value loop this replaced: that loop was itself wrong for small powers of
+    ten, because multiplying by 10 fourteen times accumulates enough error to
+    turn 1e-14 into 9.999... and report a leading 9 where the answer is 1.
+
+    repr() rather than Decimal(), because Decimal(float) exposes the exact
+    binary value -- Decimal(0.7) begins 0.6999... and would claim a leading 6
+    for a number every reader of the data calls 0.7.
     """
+    text = repr(float(abs(value)))
+    if "e" in text or "E" in text:
+        text = text.split("e")[0].split("E")[0]
+    digits = "".join(c for c in text if c.isdigit()).lstrip("0")
+    return int(digits[0]) if digits else None
+
+
+def _reference_first_digits(values: pd.Series) -> pd.Series:
+    """Expected first digits for a series, via the exact oracle."""
     values = values.abs().replace(0, np.nan).dropna()
-    if len(values) == 0:
-        return pd.Series(dtype=int)
-    out = []
-    for val in values:
-        try:
-            v = float(val)
-            if v <= 0 or not np.isfinite(v):
-                continue
-            n = v
-            if v >= 1:
-                while n >= 10:
-                    n /= 10
-            else:
-                while n < 1:
-                    n *= 10
-            d = int(n)
-            if 1 <= d <= 9:
-                out.append(d)
-        except (ValueError, TypeError, OverflowError):
-            continue
+    out = [
+        d for d in (_true_first_digit(v) for v in values if np.isfinite(v) and v > 0)
+        if d is not None and 1 <= d <= 9
+    ]
     return pd.Series(out)
 
 
@@ -375,15 +374,79 @@ class TestExtractFirstDigitsEquivalence:
         series = pd.Series([float(d) for d in range(1, 10)])
         assert analyzer.extract_first_digits(series).tolist() == list(range(1, 10))
 
+    @staticmethod
+    def _within_one_ulp_of_a_power_of_ten(value: float) -> bool:
+        """True for values indistinguishable from a power of ten in float64.
+
+        999999999999999.5 is one ULP below 1e15. Scaled into [1, 10) it becomes
+        0.9999999999999994, which is exactly what 1e-14 also becomes -- yet one
+        leads with 9 and the other with 1. At 16 significant digits the two are
+        not separable, so the digit reported for such a value is arbitrary.
+        Real CVM figures carry two decimals over magnitudes far from this edge,
+        so the case is excluded rather than chased.
+        """
+        exponent = np.floor(np.log10(abs(value)))
+        power = 10.0 ** exponent
+        nearest = min(power, 10.0 ** (exponent + 1), key=lambda p: abs(value - p))
+        return abs(value - nearest) <= abs(nearest) * 1e-15
+
     @given(st.lists(
         st.floats(min_value=1e-15, max_value=1e15, allow_nan=False, allow_infinity=False),
         max_size=200,
     ))
-    @settings(max_examples=50, deadline=None)
-    def test_property_matches_reference(self, values):
-        series = pd.Series(values, dtype=float)
+    @settings(max_examples=200, deadline=None)
+    def test_property_matches_exact_oracle(self, values):
+        usable = [
+            v for v in values
+            if v > 0 and not self._within_one_ulp_of_a_power_of_ten(v)
+        ]
+        series = pd.Series(usable, dtype=float)
         analyzer = BenfordLawAnalyzer()
         assert (
             analyzer.extract_first_digits(series).tolist()
             == _reference_first_digits(series).tolist()
         )
+
+
+class TestFirstDigitPrecision:
+    """Boundary values where naive float normalization reports the wrong digit.
+
+    Each of these broke at least one candidate implementation, including the
+    per-value loop that shipped originally.
+    """
+
+    @pytest.fixture
+    def analyzer(self):
+        return BenfordLawAnalyzer()
+
+    @pytest.mark.parametrize("value,expected", [
+        (0.7, 7),                    # 0.7 / 1e-1 == 6.999999999999999
+        (0.3, 3),
+        (0.6, 6),
+        (100000.0, 1),               # 100000.0 * 1e-5 == 0.9999999999999999
+        (100000000000.0, 1),
+        (1e-11, 1),
+        (1e-14, 1),                  # the original loop returned 9 here
+        (1e-13, 1),
+        (1e-12, 1),
+        (999999999999998.0, 9),      # log10 evaluates to exactly 15.0
+        (9.999999999999998, 9),
+        (0.9999999999999999, 9),
+    ])
+    def test_known_boundary_values(self, analyzer, value, expected):
+        assert analyzer.extract_first_digits(pd.Series([value])).tolist() == [expected]
+
+    @pytest.mark.parametrize("exponent", range(-15, 16))
+    def test_exact_powers_of_ten_lead_with_one(self, analyzer, exponent):
+        assert analyzer.extract_first_digits(pd.Series([10.0 ** exponent])).tolist() == [1]
+
+    def test_one_decimal_place_values(self, analyzer):
+        """0.1 through 9.9: every one must report the digit a reader sees."""
+        values = [i / 10 for i in range(1, 100)]
+        result = analyzer.extract_first_digits(pd.Series(values)).tolist()
+        assert result == [_true_first_digit(v) for v in values]
+
+    def test_two_decimal_place_values(self, analyzer):
+        values = [i / 100 for i in range(1, 1000)]
+        result = analyzer.extract_first_digits(pd.Series(values)).tolist()
+        assert result == [_true_first_digit(v) for v in values]

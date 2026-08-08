@@ -36,6 +36,18 @@ class TestReportGenerator:
         content = path.read_text()
         assert "<table" in content
 
+    def test_save_dataframe_excel(self, generator):
+        """Exercises DataFrame.to_excel, which pulls in openpyxl lazily.
+
+        The excel branch had no test, so the fact that openpyxl was never
+        declared as a dependency went unnoticed -- writing an Excel report
+        would have raised ImportError at the point of writing it.
+        """
+        df = pd.DataFrame({"X": [10], "Y": ["text"]})
+        path = generator.save_dataframe(df, "test.xlsx", format="excel")
+        assert path.exists()
+        pd.testing.assert_frame_equal(pd.read_excel(path), df)
+
     def test_save_dataframe_unsupported_format(self, generator):
         df = pd.DataFrame({"A": [1]})
         with pytest.raises(ValueError, match="Unsupported format"):

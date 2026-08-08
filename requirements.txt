@@ -17,3 +17,13 @@ matplotlib>=3.7.0
 # Utilities
 python-dateutil>=2.8.0
 tqdm>=4.65.0
+
+# Pandas optional dependencies. Neither is imported anywhere by name -- both are
+# reached through a pandas API that loads them lazily -- so grepping for imports
+# does not find them. Removing either produces an ImportError only at the moment
+# a report is written.
+#
+#   tabulate  <- DataFrame.to_markdown()  (src/utils/reporting.py)
+#   openpyxl  <- DataFrame.to_excel()     (src/utils/reporting.py, analyzers/base.py)
+tabulate>=0.9.0
+openpyxl>=3.1.0
