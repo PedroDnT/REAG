@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -29,6 +30,8 @@ from src.enrichment.interfaces import SearchResult
 from src.explain.explainer import Explainer
 from src.processors.data_processor import DataProcessor
 from src.utils.cnpj_utils import normalize_cnpj_list
+
+logger = logging.getLogger(__name__)
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
@@ -83,6 +86,108 @@ class LoadedData:
     cda: pd.DataFrame | None
 
 
+def _has(df: pd.DataFrame | None, *required_columns: str) -> bool:
+    """True when *df* holds rows and every required column."""
+    if df is None or df.empty:
+        return False
+    return all(column in df.columns for column in required_columns)
+
+
+@dataclass(frozen=True)
+class AnalyzerSpec:
+    """One optional analyzer: when it can run, and what it produces.
+
+    Args:
+        name: Selector used by --analysis and ANALYSIS_CHOICES
+        is_runnable: Predicate over LoadedData deciding whether inputs suffice
+        run: Callable returning {finding_key: DataFrame}
+    """
+
+    name: str
+    is_runnable: Callable[[LoadedData], bool]
+    run: Callable[[LoadedData], dict[str, pd.DataFrame]]
+
+
+def _analyzer_specs(config: Config) -> tuple[AnalyzerSpec, ...]:
+    """Declare the optional analyzers, their input requirements and their calls."""
+
+    def _cda(loaded: LoadedData) -> pd.DataFrame:
+        return _normalize_cda_columns(loaded.cda)
+
+    return (
+        AnalyzerSpec(
+            name="quotaholder",
+            is_runnable=lambda d: _has(d.informe, "NR_COTST"),
+            run=lambda d: {
+                "quotaholder_anomalies": QuotaholderAnalyzer(config=config).analyze(
+                    d.informe, cadastro_df=d.cadastro
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="cost_basis",
+            is_runnable=lambda d: _has(d.cda, "VL_CUSTO_POS_FINAL"),
+            run=lambda d: {
+                "cost_basis_anomalies": CostBasisAnalyzer(config=config).analyze(_cda(d))
+            },
+        ),
+        AnalyzerSpec(
+            name="reconciliation",
+            is_runnable=lambda d: _has(d.cda) and _has(d.informe),
+            run=lambda d: {
+                "reconciliation_gaps": PortfolioReconciliationAnalyzer(config=config).analyze(
+                    _cda(d), d.informe
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="lifecycle",
+            is_runnable=lambda d: _has(d.cadastro, "DT_CONST"),
+            run=lambda d: {
+                "lifecycle_anomalies": FundLifecycleAnalyzer(config=config).analyze(
+                    d.cadastro, informe_df=d.informe
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="manager_network",
+            is_runnable=lambda d: _has(d.cadastro, "CNPJ_GESTOR"),
+            run=lambda d: {
+                "manager_network_anomalies": ManagerNetworkAnalyzer(config=config).analyze(
+                    d.cadastro,
+                    cda_df=_cda(d) if _has(d.cda) else None,
+                    informe_df=d.informe,
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="window_dressing",
+            is_runnable=lambda d: _has(d.informe, "VL_QUOTA"),
+            run=lambda d: {
+                "window_dressing": WindowDressingDetector(config=config).analyze(d.informe)
+            },
+        ),
+        AnalyzerSpec(
+            name="valuation_smoothing",
+            is_runnable=lambda d: _has(d.informe, "VL_QUOTA"),
+            run=lambda d: {
+                "valuation_smoothing": ValuationSmoothingAnalyzer(config=config).analyze(
+                    d.informe
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="cross_fund_issuer",
+            is_runnable=lambda d: _has(d.cda) and _has(d.cadastro),
+            run=lambda d: {
+                "cross_fund_issuer": CrossFundIssuerAnalyzer(config=config).analyze(
+                    _cda(d), d.cadastro
+                )
+            },
+        ),
+    )
+
+
 def run_investigation(args: argparse.Namespace) -> int:
     config = Config()
     selected_analyses = _selected_analyses(args.analysis)
@@ -96,24 +201,26 @@ def run_investigation(args: argparse.Namespace) -> int:
 
     results: dict[str, pd.DataFrame] = {}
     sources: dict[str, str] = {}
+    failures: list[str] = []
+    skipped: list[str] = []
 
     findings_dir = output_dir / "findings"
     findings_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Core detectors (public-data based) ---
     if "flow" in selected_analyses and loaded.informe is not None and not loaded.informe.empty:
-        informe = loaded.informe.copy()
-        informe = processor.calculate_net_flow(informe)
+        try:
+            informe = loaded.informe.copy()
+            informe = processor.calculate_net_flow(informe)
 
-        anomaly_detector = AnomalyDetector(config=config)
-        anomaly_report = anomaly_detector.generate_anomaly_report(informe, cda_df=loaded.cda)
-        for key, df in anomaly_report.items():
-            results[key] = df
-            sources[key] = _save_finding(df, findings_dir / f"{key}.csv")
-
-        # Divergences come from the anomaly report as well.
-        if "divergences" in results:
-            pass
+            anomaly_detector = AnomalyDetector(config=config)
+            anomaly_report = anomaly_detector.generate_anomaly_report(informe, cda_df=loaded.cda)
+            for key, df in anomaly_report.items():
+                results[key] = df
+                sources[key] = _save_finding(df, findings_dir / f"{key}.csv")
+        except Exception:
+            logger.exception("Analyzer flow failed")
+            failures.append("flow")
 
     if (
         "schemes" in selected_analyses
@@ -124,175 +231,90 @@ def run_investigation(args: argparse.Namespace) -> int:
         and loaded.informe is not None
         and not loaded.informe.empty
     ):
-        cda = _normalize_cda_columns(loaded.cda)
+        try:
+            cda = _normalize_cda_columns(loaded.cda)
 
-        scheme_detector = FraudSchemeDetector()
-        schemes = scheme_detector.generate_fraud_scheme_report(
-            informe_df=loaded.informe,
-            cda_df=cda,
-            cadastro_df=loaded.cadastro,
-            output_path=None,
-        )
-        # Normalize scheme keys to match explainer expectations.
-        scheme_key_map = {
-            "circular_flow": "circular_flow",
-            "layered_funds": "layered_funds",
-            "asset_inflation": "asset_inflation",
-            "shell_networks": "shell_networks",
-        }
-        for raw_key, df in schemes.items():
-            key = scheme_key_map.get(raw_key, raw_key)
+            scheme_detector = FraudSchemeDetector()
+            schemes = scheme_detector.generate_fraud_scheme_report(
+                informe_df=loaded.informe,
+                cda_df=cda,
+                cadastro_df=loaded.cadastro,
+                output_path=None,
+            )
+            # Normalize scheme keys to match explainer expectations.
+            scheme_key_map = {
+                "circular_flow": "circular_flow",
+                "layered_funds": "layered_funds",
+                "asset_inflation": "asset_inflation",
+                "shell_networks": "shell_networks",
+            }
+            for raw_key, df in schemes.items():
+                key = scheme_key_map.get(raw_key, raw_key)
+                results[key] = df
+                sources[key] = _save_finding(df, findings_dir / f"{key}.csv")
+        except Exception:
+            logger.exception("Analyzer schemes failed")
+            failures.append("schemes")
+
+    if "phantom_assets" in selected_analyses and loaded.cda is not None and not loaded.cda.empty:
+        try:
+            cda = _normalize_cda_columns(loaded.cda)
+            phantom = EnhancedPhantomAssetDetector(cache_dir=Path("data/cache"))
+            # Best-effort: load valid funds list when cadastro file exists on disk.
+            if args.cadastro and Path(args.cadastro).exists():
+                try:
+                    phantom.load_funds_from_cadastro(Path(args.cadastro))
+                except Exception:
+                    logger.warning(
+                        "Could not load cadastro fund list from %s; phantom-asset "
+                        "detection will run without it", args.cadastro, exc_info=True
+                    )
+            phantom.update_registries()
+            phantom_assets = phantom.detect_enhanced_phantom_assets(cda)
+            results["phantom_assets"] = phantom_assets
+            sources["phantom_assets"] = _save_finding(phantom_assets, findings_dir / "phantom_assets.csv")
+
+            phantom_by_fund = _phantom_assets_by_fund(cda_df=cda, phantom_assets=phantom_assets)
+            results["phantom_assets_by_fund"] = phantom_by_fund
+            sources["phantom_assets_by_fund"] = _save_finding(
+                phantom_by_fund, findings_dir / "phantom_assets_by_fund.csv"
+            )
+        except Exception:
+            logger.exception("Analyzer phantom_assets failed")
+            failures.append("phantom_assets")
+
+    # --- New analyzers ---
+    #
+    # Each entry declares when it can run and how. Previously these were nine
+    # near-identical blocks each ending in `except Exception: pass`, which made a
+    # crashed analyzer indistinguishable from one that found nothing -- the worst
+    # possible failure mode for a forensic tool.
+    for spec in _analyzer_specs(config):
+        if spec.name not in selected_analyses:
+            continue
+        if not spec.is_runnable(loaded):
+            logger.debug("Skipping %s: required inputs not available", spec.name)
+            skipped.append(spec.name)
+            continue
+
+        try:
+            produced = spec.run(loaded)
+        except Exception:
+            logger.exception("Analyzer %s failed", spec.name)
+            failures.append(spec.name)
+            continue
+
+        for key, df in produced.items():
             results[key] = df
             sources[key] = _save_finding(df, findings_dir / f"{key}.csv")
 
-    if "phantom_assets" in selected_analyses and loaded.cda is not None and not loaded.cda.empty:
-        cda = _normalize_cda_columns(loaded.cda)
-        phantom = EnhancedPhantomAssetDetector(cache_dir=Path("data/cache"))
-        # Best-effort: load valid funds list when cadastro file exists on disk.
-        if args.cadastro and Path(args.cadastro).exists():
-            try:
-                phantom.load_funds_from_cadastro(Path(args.cadastro))
-            except Exception:
-                pass
-        phantom.update_registries()
-        phantom_assets = phantom.detect_enhanced_phantom_assets(cda)
-        results["phantom_assets"] = phantom_assets
-        sources["phantom_assets"] = _save_finding(phantom_assets, findings_dir / "phantom_assets.csv")
-
-        phantom_by_fund = _phantom_assets_by_fund(cda_df=cda, phantom_assets=phantom_assets)
-        results["phantom_assets_by_fund"] = phantom_by_fund
-        sources["phantom_assets_by_fund"] = _save_finding(phantom_by_fund, findings_dir / "phantom_assets_by_fund.csv")
-
-    # --- New analyzers ---
-
-    # Quotaholder analysis (needs informe with NR_COTST)
-    if (
-        "quotaholder" in selected_analyses
-        and loaded.informe is not None
-        and not loaded.informe.empty
-        and "NR_COTST" in loaded.informe.columns
-    ):
-        try:
-            quotaholder = QuotaholderAnalyzer(config=config)
-            qh_results = quotaholder.analyze(loaded.informe, cadastro_df=loaded.cadastro)
-            results["quotaholder_anomalies"] = qh_results
-            sources["quotaholder_anomalies"] = _save_finding(qh_results, findings_dir / "quotaholder_anomalies.csv")
-        except Exception:
-            pass
-
-    # Cost basis analysis (needs cda with VL_CUSTO_POS_FINAL)
-    if (
-        "cost_basis" in selected_analyses
-        and loaded.cda is not None
-        and not loaded.cda.empty
-        and "VL_CUSTO_POS_FINAL" in loaded.cda.columns
-    ):
-        try:
-            cda = _normalize_cda_columns(loaded.cda)
-            cost_basis = CostBasisAnalyzer(config=config)
-            cb_results = cost_basis.analyze(cda)
-            results["cost_basis_anomalies"] = cb_results
-            sources["cost_basis_anomalies"] = _save_finding(cb_results, findings_dir / "cost_basis_anomalies.csv")
-        except Exception:
-            pass
-
-    # Portfolio reconciliation (needs cda + informe)
-    if (
-        "reconciliation" in selected_analyses
-        and loaded.cda is not None
-        and not loaded.cda.empty
-        and loaded.informe is not None
-        and not loaded.informe.empty
-    ):
-        try:
-            cda = _normalize_cda_columns(loaded.cda)
-            recon = PortfolioReconciliationAnalyzer(config=config)
-            recon_results = recon.analyze(cda, loaded.informe)
-            results["reconciliation_gaps"] = recon_results
-            sources["reconciliation_gaps"] = _save_finding(recon_results, findings_dir / "reconciliation_gaps.csv")
-        except Exception:
-            pass
-
-    # Fund lifecycle analysis (needs cadastro)
-    if (
-        "lifecycle" in selected_analyses
-        and loaded.cadastro is not None
-        and not loaded.cadastro.empty
-        and "DT_CONST" in loaded.cadastro.columns
-    ):
-        try:
-            lifecycle = FundLifecycleAnalyzer(config=config)
-            lc_results = lifecycle.analyze(loaded.cadastro, informe_df=loaded.informe)
-            results["lifecycle_anomalies"] = lc_results
-            sources["lifecycle_anomalies"] = _save_finding(lc_results, findings_dir / "lifecycle_anomalies.csv")
-        except Exception:
-            pass
-
-    # Manager network analysis (needs cadastro with CNPJ_GESTOR)
-    if (
-        "manager_network" in selected_analyses
-        and loaded.cadastro is not None
-        and not loaded.cadastro.empty
-        and "CNPJ_GESTOR" in loaded.cadastro.columns
-    ):
-        try:
-            manager_net = ManagerNetworkAnalyzer(config=config)
-            mn_results = manager_net.analyze(
-                loaded.cadastro,
-                cda_df=_normalize_cda_columns(loaded.cda) if loaded.cda is not None and not loaded.cda.empty else None,
-                informe_df=loaded.informe,
-            )
-            results["manager_network_anomalies"] = mn_results
-            sources["manager_network_anomalies"] = _save_finding(mn_results, findings_dir / "manager_network_anomalies.csv")
-        except Exception:
-            pass
-
-    # Window dressing (needs informe with VL_QUOTA)
-    if (
-        "window_dressing" in selected_analyses
-        and loaded.informe is not None
-        and not loaded.informe.empty
-        and "VL_QUOTA" in loaded.informe.columns
-    ):
-        try:
-            wd = WindowDressingDetector(config=config)
-            wd_results = wd.analyze(loaded.informe)
-            results["window_dressing"] = wd_results
-            sources["window_dressing"] = _save_finding(wd_results, findings_dir / "window_dressing.csv")
-        except Exception:
-            pass
-
-    # Valuation smoothing (needs informe with VL_QUOTA)
-    if (
-        "valuation_smoothing" in selected_analyses
-        and loaded.informe is not None
-        and not loaded.informe.empty
-        and "VL_QUOTA" in loaded.informe.columns
-    ):
-        try:
-            vs = ValuationSmoothingAnalyzer(config=config)
-            vs_results = vs.analyze(loaded.informe)
-            results["valuation_smoothing"] = vs_results
-            sources["valuation_smoothing"] = _save_finding(vs_results, findings_dir / "valuation_smoothing.csv")
-        except Exception:
-            pass
-
-    # Cross-fund issuer analysis (needs cda + cadastro)
-    if (
-        "cross_fund_issuer" in selected_analyses
-        and loaded.cda is not None
-        and not loaded.cda.empty
-        and loaded.cadastro is not None
-        and not loaded.cadastro.empty
-    ):
-        try:
-            cda = _normalize_cda_columns(loaded.cda)
-            cfi = CrossFundIssuerAnalyzer(config=config)
-            cfi_results = cfi.analyze(cda, loaded.cadastro)
-            results["cross_fund_issuer"] = cfi_results
-            sources["cross_fund_issuer"] = _save_finding(cfi_results, findings_dir / "cross_fund_issuer.csv")
-        except Exception:
-            pass
+    if failures:
+        logger.error(
+            "%d of %d analyzers failed: %s. Findings below are incomplete.",
+            len(failures),
+            len(failures) + len(skipped) + len(results),
+            ", ".join(failures),
+        )
 
     _write_run_metadata(
         output_dir=output_dir,
@@ -300,10 +322,14 @@ def run_investigation(args: argparse.Namespace) -> int:
         args=args,
         results=results,
         sources=sources,
+        failures=failures,
+        skipped=skipped,
     )
 
+    exit_code = 1 if (failures and getattr(args, "strict", False)) else 0
+
     if not args.explain:
-        return 0
+        return exit_code
 
     contexts_by_entity_id: dict[str, dict[str, Any]] = {}
     if args.enable_enrichment:
@@ -330,7 +356,7 @@ def run_investigation(args: argparse.Namespace) -> int:
         explain_format=args.explain_format,
     )
 
-    return 0
+    return exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -360,6 +386,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[*ANALYSIS_CHOICES, "all"],
         default=["all"],
         help="Which investigation modules to run. Defaults to all modules.",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Exit non-zero if any analyzer failed. Use in automation, where an "
+            "empty report caused by a crash must not read as a clean result."
+        ),
     )
 
     parser.add_argument("--enable-enrichment", action="store_true", help="Enable external context enrichment (Exa first).")
@@ -528,8 +562,12 @@ def _write_run_metadata(
     args: argparse.Namespace,
     results: dict[str, pd.DataFrame],
     sources: dict[str, str],
+    failures: list[str] | None = None,
+    skipped: list[str] | None = None,
 ) -> None:
     selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
+    failures = failures or []
+    skipped = skipped or []
     meta = {
         "run_id": run_id,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -543,10 +581,27 @@ def _write_run_metadata(
             "sources": sources,
             "counts": {k: int(len(df)) for k, df in results.items()},
         },
+        # An analyzer that crashed produces no findings, which is otherwise
+        # indistinguishable from an analyzer that found nothing. Record both so
+        # a run's own metadata says whether its coverage was complete.
+        "execution": {
+            "complete": not failures,
+            "failed_analyzers": failures,
+            "skipped_analyzers": skipped,
+        },
         "disclaimer": [
             "Automated red flags are not proof of wrongdoing.",
             "Findings are prioritized leads requiring corroboration.",
-        ],
+        ]
+        + (
+            [
+                f"INCOMPLETE RUN: {len(failures)} analyzer(s) failed "
+                f"({', '.join(failures)}); absence of findings from them means "
+                f"nothing."
+            ]
+            if failures
+            else []
+        ),
     }
     (output_dir / "summary.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
