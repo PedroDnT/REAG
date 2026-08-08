@@ -65,6 +65,24 @@ Outputs land in `reports/investigation/<run_id>/`:
 `--analysis` selects individual detectors; `--help` lists them. There is also a
 guided terminal flow at `scripts/investigation_tui.py`.
 
+### Scoping to a subset of funds
+
+By default every fund in the loaded data is investigated. To narrow it:
+
+```bash
+# Every fund under one administrator (partial, case-insensitive name match)
+--fund-mode administrator --fund-identifier "ACME DTVM" --active-funds-only
+
+# Every fund under one manager
+--fund-mode manager --fund-identifier "ACME GESTORA"
+
+# An explicit list
+--fund-mode cnpj_list --fund-identifier "12.345.678/0001-90,11222333000181"
+```
+
+Names are resolved against the cadastro, so `--fund-mode administrator` and
+`--fund-mode manager` need one loaded.
+
 **Use `--strict` in automation.** It exits non-zero if any analyzer crashed. A
 report with no findings because a detector died looks exactly like a clean
 result, and `summary.json`'s `execution` block records which analyzers failed or

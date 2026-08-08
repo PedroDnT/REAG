@@ -32,6 +32,7 @@ from src.enrichment.interfaces import SearchResult
 from src.explain.explainer import Explainer
 from src.processors.data_processor import DataProcessor
 from src.utils.cnpj_utils import normalize_cnpj_list
+from src.utils.fund_selector import FundSelector
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Which investigation modules to run. Defaults to all modules.",
     )
     parser.add_argument(
+        "--fund-mode",
+        choices=["administrator", "manager", "cnpj_list", "all"],
+        default=None,
+        help=(
+            "Restrict the investigation to a subset of funds. 'administrator' and "
+            "'manager' resolve --fund-identifier against the cadastro; 'cnpj_list' "
+            "takes comma-separated CNPJs; 'all' (the default) applies no filter."
+        ),
+    )
+    parser.add_argument(
+        "--fund-identifier",
+        default=None,
+        help=(
+            "Value for --fund-mode: an administrator or manager name (partial, "
+            "case-insensitive), or comma-separated CNPJs for cnpj_list."
+        ),
+    )
+    parser.add_argument(
+        "--active-funds-only",
+        action="store_true",
+        help="With --fund-mode, keep only funds in 'EM FUNCIONAMENTO NORMAL' status.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help=(
@@ -463,7 +487,7 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
         if maybe:
             cda = processor.read_cda(maybe)
 
-    selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
+    selected_cnpjs = resolve_fund_scope(args, cadastro)
     if selected_cnpjs:
         available_cnpjs: set[str] = set()
         for frame in (cadastro, informe, cda):
@@ -474,7 +498,10 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
             )
         missing = [cnpj for cnpj in selected_cnpjs if cnpj not in available_cnpjs]
         if missing:
-            print(f"[warning] {len(missing)} selected funds not present in loaded data; continuing.")
+            logger.warning(
+                "%d selected fund(s) not present in loaded data; continuing without them",
+                len(missing),
+            )
 
         if cadastro is not None and not cadastro.empty:
             cadastro = processor.filter_by_cnpj(cadastro, selected_cnpjs)
@@ -484,6 +511,84 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
             cda = processor.filter_by_cnpj(cda, selected_cnpjs)
 
     return LoadedData(cadastro=cadastro, informe=informe, cda=cda)
+
+
+def resolve_fund_scope(
+    args: argparse.Namespace, cadastro: pd.DataFrame | None
+) -> list[str]:
+    """Resolve which funds to investigate, as a list of normalized CNPJs.
+
+    Combines two inputs:
+
+    - ``--fund-mode`` / ``--fund-identifier``, resolved against the cadastro via
+      :class:`~src.utils.fund_selector.FundSelector`. This is what makes the
+      toolkit usable against any administrator or manager rather than only the
+      case it was built for.
+    - ``selected_cnpjs``, an explicit list supplied by the TUI.
+
+    Both may be given; the result is their union. An empty list means no
+    filtering, i.e. investigate every fund in the loaded data.
+
+    Args:
+        args: Parsed CLI arguments
+        cadastro: Fund registry, needed to resolve names to CNPJs
+
+    Returns:
+        Normalized, de-duplicated CNPJs, or [] for "no filter"
+    """
+    explicit = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
+
+    mode = getattr(args, "fund_mode", None)
+    if not mode or mode == "all":
+        return explicit
+
+    identifier = getattr(args, "fund_identifier", None)
+
+    if mode == "cnpj_list":
+        if not identifier:
+            logger.warning("--fund-mode cnpj_list requires --fund-identifier; ignoring")
+            return explicit
+        from_mode = _normalize_selected_cnpjs(
+            [part.strip() for part in identifier.split(",")]
+        )
+        if not from_mode:
+            logger.warning("No usable CNPJs in --fund-identifier %r", identifier)
+        return list(dict.fromkeys(explicit + from_mode))
+
+    if cadastro is None or cadastro.empty:
+        logger.warning(
+            "--fund-mode %s needs a cadastro to resolve names to CNPJs, "
+            "but none was loaded; no fund filter applied",
+            mode,
+        )
+        return explicit
+
+    if not identifier:
+        logger.warning("--fund-mode %s requires --fund-identifier; ignoring", mode)
+        return explicit
+
+    selector = FundSelector(cadastro)
+    if mode == "administrator":
+        matched = selector.select_by_administrator(identifier)
+    elif mode == "manager":
+        matched = selector.select_by_manager(identifier)
+    else:  # pragma: no cover - argparse restricts the choices
+        logger.warning("Unknown fund mode %r; ignoring", mode)
+        return explicit
+
+    if getattr(args, "active_funds_only", False):
+        matched = selector.select_active_only(matched)
+
+    if matched.empty or "CNPJ_FUNDO" not in matched.columns:
+        logger.warning("No funds matched --fund-mode %s %r", mode, identifier)
+        return explicit
+
+    from_mode = _normalize_selected_cnpjs(
+        matched["CNPJ_FUNDO"].dropna().astype(str).tolist()
+    )
+    logger.info("Fund scope: %d fund(s) matched %s %r", len(from_mode), mode, identifier)
+
+    return list(dict.fromkeys(explicit + from_mode))
 
 
 def _read_informe_any(path: Path, *, processor: DataProcessor) -> pd.DataFrame:
@@ -588,6 +693,8 @@ def _write_run_metadata(
             "fund_filter_enabled": bool(selected_cnpjs),
             "selected_funds_count": len(selected_cnpjs),
             "selected_cnpjs": selected_cnpjs,
+            "fund_mode": getattr(args, "fund_mode", None),
+            "fund_identifier": getattr(args, "fund_identifier", None),
         },
         "outputs": {
             "sources": sources,
