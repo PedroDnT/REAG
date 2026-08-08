@@ -1,0 +1,86 @@
+{
+  "universe": {
+    "n_funds": 40,
+    "n_days": 180,
+    "seed": 42
+  },
+  "signals": {
+    "benford_violation": {
+      "signal": "benford_violation",
+      "injected_funds": 4,
+      "detected_funds": 7,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 4,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.1
+    },
+    "cross_fund_price_divergence": {
+      "signal": "cross_fund_price_divergence",
+      "injected_funds": 4,
+      "detected_funds": 4,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 0,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.0
+    },
+    "pl_drop": {
+      "signal": "pl_drop",
+      "injected_funds": 4,
+      "detected_funds": 4,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 0,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.0
+    },
+    "quotaholder_exodus": {
+      "signal": "quotaholder_exodus",
+      "injected_funds": 4,
+      "detected_funds": 5,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 2,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.05
+    },
+    "redemption_run": {
+      "signal": "redemption_run",
+      "injected_funds": 4,
+      "detected_funds": 8,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 4,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.1
+    },
+    "valuation_smoothing": {
+      "signal": "valuation_smoothing",
+      "injected_funds": 4,
+      "detected_funds": 4,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 0,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.0
+    },
+    "window_dressing": {
+      "signal": "window_dressing",
+      "injected_funds": 4,
+      "detected_funds": 4,
+      "true_positives": 4,
+      "false_negatives": 0,
+      "clean_universe_flags": 0,
+      "clean_universe_funds": 40,
+      "recall": 1.0,
+      "false_positive_rate": 0.0
+    }
+  }
+}

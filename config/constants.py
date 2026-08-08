@@ -75,6 +75,26 @@ PL_DROP_WARNING = 10.0
 # Consecutive redemption days indicating run
 REDEMPTION_RUN_DAYS = 5
 
+# Minimum cumulative outflow over a run, as a percentage of the fund's net
+# assets, for it to count as a redemption run.
+#
+# Consecutive-day counting alone is not a detector: net flow crosses zero
+# constantly, so a fund with unremarkable flows produces long negative streaks
+# by chance. Measured against the synthetic clean universe in evals/, the day
+# count alone flags 75% of funds carrying no injected anomaly. Adding this gate
+# brings that to 10% while still recovering every injected run:
+#
+#     gate    clean false positives    recall
+#     none                      75%      100%
+#      5%                       25%      100%
+#     10%                       10%      100%
+#     20%                        0%      100%
+#
+# 10% is the point where the signal is unambiguously material -- a fund that
+# shed a tenth of its net assets over a sustained redemption stretch -- without
+# demanding a collapse before it will report anything.
+REDEMPTION_RUN_MIN_PCT = 10.0
+
 # Cutoff for DIVERGENCE_SCORE in detect_divergence_flow_performance.
 # That score is -(Z_FLOW * Z_RETORNO), i.e. a *product* of two Z-scores, so its
 # unit is z^2 rather than z. 4.0 means both legs at roughly 2 sigma in opposite

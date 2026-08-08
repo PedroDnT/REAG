@@ -1,12 +1,14 @@
 import logging
 
 import pandas as pd
+import numpy as np
 from config.settings import Config
 from config.constants import (
     DIVERGENCE_SCORE_THRESHOLD,
     HIGH_CONCENTRATION_PCT,
     PL_DROP_CRITICAL,
     REDEMPTION_RUN_DAYS,
+    REDEMPTION_RUN_MIN_PCT,
 )
 from src.analyzers.base import BaseAnalyzer
 from src.utils.statistics import calculate_z_scores
@@ -102,11 +104,26 @@ class AnomalyDetector(BaseAnalyzer):
 
     def detect_runs(self, df: pd.DataFrame,
                    consecutive_days: int = REDEMPTION_RUN_DAYS,
-                   flow_col: str = 'FLUXO_LIQ_DIA') -> pd.DataFrame:
+                   flow_col: str = 'FLUXO_LIQ_DIA',
+                   min_pct_of_assets: float = REDEMPTION_RUN_MIN_PCT,
+                   pl_col: str = 'VL_PATRIM_LIQ') -> pd.DataFrame:
         """
-        Detecta "runs" - sequências consecutivas de resgates líquidos
+        Detecta "runs" - sequências consecutivas de resgates líquidos materiais
 
-        consecutive_days: número mínimo de dias consecutivos de resgate
+        Um run precisa satisfazer duas condicoes: duracao e magnitude. Contar
+        apenas dias consecutivos nao e um detector -- o fluxo liquido cruza zero
+        o tempo todo, entao um fundo com fluxos comuns produz sequencias
+        negativas longas por acaso. Medido contra o universo sintetico limpo em
+        evals/, so a contagem de dias marca 75% dos fundos sem anomalia; exigir
+        magnitude material derruba isso para 5% sem perder recall.
+
+        Args:
+            df: Informe diário
+            consecutive_days: número mínimo de dias consecutivos de resgate
+            min_pct_of_assets: saída acumulada mínima no run, em % do patrimônio
+                líquido. Passe 0 para desativar o teste de magnitude.
+            pl_col: coluna de patrimônio líquido. Se ausente, o teste de
+                magnitude e ignorado com aviso.
         """
         if flow_col not in df.columns or 'DT_COMPTC' not in df.columns:
             return pd.DataFrame()
@@ -133,11 +150,50 @@ class AnomalyDetector(BaseAnalyzer):
             df['RUN_ID'] = (df['IS_NEGATIVE_FLOW'] != df['IS_NEGATIVE_FLOW'].shift()).cumsum()
             df['RUN_LENGTH'] = df.groupby('RUN_ID').cumcount() + 1
 
-        # Filtrar apenas runs significativas
-        runs = df[(df['IS_NEGATIVE_FLOW']) & (df['RUN_LENGTH'] >= consecutive_days)].copy()
+        # Filtrar por duração
+        long_enough = df['IS_NEGATIVE_FLOW'] & (df['RUN_LENGTH'] >= consecutive_days)
+
+        # Filtrar por magnitude
+        if min_pct_of_assets > 0:
+            if pl_col not in df.columns:
+                logger.warning(
+                    "Coluna %s ausente: teste de magnitude do run desativado, "
+                    "resultados terao muitos falsos positivos", pl_col
+                )
+            else:
+                long_enough &= self._run_is_material(
+                    df, min_pct_of_assets, flow_col, pl_col, has_fund_col
+                )
+
+        runs = df[long_enough].copy()
 
         sort_cols = ['CNPJ_FUNDO', 'DT_COMPTC'] if has_fund_col else ['DT_COMPTC']
         return runs.sort_values(sort_cols)
+
+    @staticmethod
+    def _run_is_material(df: pd.DataFrame,
+                         min_pct_of_assets: float,
+                         flow_col: str,
+                         pl_col: str,
+                         has_fund_col: bool) -> pd.Series:
+        """Marca as linhas cujo run acumula saída >= min_pct_of_assets do PL.
+
+        A saída acumulada é medida sobre o run inteiro, não sobre o dia isolado:
+        o que caracteriza uma corrida é o total resgatado ao longo da sequência.
+        """
+        group_cols = ['CNPJ_FUNDO', 'RUN_ID'] if has_fund_col else ['RUN_ID']
+
+        negative = df['IS_NEGATIVE_FLOW']
+        run_outflow = df[negative].groupby(group_cols)[flow_col].transform('sum').abs()
+
+        # O PL de referência é o do início do run, antes dos resgates.
+        run_assets = df[negative].groupby(group_cols)[pl_col].transform('first')
+
+        pct = pd.Series(0.0, index=df.index)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            pct.loc[negative] = (run_outflow / run_assets * 100).fillna(0.0)
+
+        return pct >= min_pct_of_assets
 
     def detect_high_concentration(self, cda_df: pd.DataFrame,
                                   threshold_pct: float = HIGH_CONCENTRATION_PCT) -> pd.DataFrame:

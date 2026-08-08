@@ -209,17 +209,78 @@ class TestReportUsesCorrectConstants:
     def test_runs_use_redemption_run_days_not_flow_window(self, detector):
         from config.constants import REDEMPTION_RUN_DAYS
 
-        # A 6-day redemption streak: caught at the intended 5-day threshold,
-        # missed at the 10-day FLOW_WINDOW_DAYS value that was wired in before.
+        # A 6-day redemption streak shedding 5% of net assets a day: caught at
+        # the intended 5-day threshold, missed at the 10-day FLOW_WINDOW_DAYS
+        # value that was wired in before.
         df = pd.DataFrame({
             "CNPJ_FUNDO": ["F1"] * 6,
             "DT_COMPTC": pd.date_range("2024-01-01", periods=6),
             "VL_QUOTA": [1.0] * 6,
-            "VL_PATRIM_LIQ": [1_000_000] * 6,
-            "FLUXO_LIQ_DIA": [-100.0] * 6,
+            "VL_PATRIM_LIQ": [1_000_000.0] * 6,
+            "FLUXO_LIQ_DIA": [-50_000.0] * 6,
         })
         assert REDEMPTION_RUN_DAYS == 5
         assert len(detector.generate_anomaly_report(df)["runs"]) > 0
+
+
+class TestRunMagnitudeGate:
+    """A run must be material, not merely long.
+
+    Counting consecutive negative days alone flagged 75% of funds in a synthetic
+    universe containing no fraud: net flow crosses zero constantly, so long
+    negative streaks arise by chance. See evals/ and REDEMPTION_RUN_MIN_PCT.
+    """
+
+    @staticmethod
+    def _run(daily_outflow, assets=1_000_000.0, days=8):
+        return pd.DataFrame({
+            "CNPJ_FUNDO": ["F1"] * days,
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=days),
+            "VL_PATRIM_LIQ": [assets] * days,
+            "FLUXO_LIQ_DIA": [-daily_outflow] * days,
+        })
+
+    def test_trivial_outflows_are_not_a_run(self, detector):
+        """Eight days of losing 0.01% a day is not a redemption run."""
+        assert detector.detect_runs(self._run(100.0)).empty
+
+    def test_material_outflows_are_a_run(self, detector):
+        """Eight days of losing 5% a day is."""
+        assert not detector.detect_runs(self._run(50_000.0)).empty
+
+    def test_gate_is_measured_over_the_whole_run_not_one_day(self, detector):
+        """No single day clears 10%, but the run cumulatively sheds 16%."""
+        result = detector.detect_runs(self._run(20_000.0), min_pct_of_assets=10.0)
+        assert not result.empty
+
+    def test_gate_can_be_disabled(self, detector):
+        assert not detector.detect_runs(self._run(100.0), min_pct_of_assets=0).empty
+
+    def test_duration_is_still_required(self, detector):
+        """A single enormous outflow is a PL event, not a run."""
+        df = self._run(500_000.0, days=8)
+        df.loc[df.index[1:], "FLUXO_LIQ_DIA"] = 1000.0  # only day 0 is negative
+        assert detector.detect_runs(df).empty
+
+    def test_missing_pl_column_warns_and_skips_the_gate(self, detector, caplog):
+        import logging
+
+        df = self._run(100.0).drop(columns=["VL_PATRIM_LIQ"])
+        with caplog.at_level(logging.WARNING):
+            result = detector.detect_runs(df)
+
+        assert not result.empty, "without PL the gate cannot apply"
+        assert any("VL_PATRIM_LIQ" in r.message for r in caplog.records)
+
+    def test_gate_applies_per_fund(self, detector):
+        """One fund's material run must not qualify another's trivial one."""
+        big = self._run(50_000.0)
+        small = self._run(100.0)
+        small["CNPJ_FUNDO"] = "F2"
+
+        result = detector.detect_runs(pd.concat([big, small], ignore_index=True))
+
+        assert set(result["CNPJ_FUNDO"]) == {"F1"}
 
     def test_pl_drops_use_pl_drop_critical(self, detector, monkeypatch):
         """The threshold must come from the constant, not a hardcoded 20.0."""
