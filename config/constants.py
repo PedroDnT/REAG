@@ -75,6 +75,15 @@ PL_DROP_WARNING = 10.0
 # Consecutive redemption days indicating run
 REDEMPTION_RUN_DAYS = 5
 
+# Cutoff for DIVERGENCE_SCORE in detect_divergence_flow_performance.
+# That score is -(Z_FLOW * Z_RETORNO), i.e. a *product* of two Z-scores, so its
+# unit is z^2 rather than z. 4.0 means both legs at roughly 2 sigma in opposite
+# directions. Do not reuse a plain Z-score threshold here.
+DIVERGENCE_SCORE_THRESHOLD = 4.0
+
+# Share of a single fund's portfolio held in one asset that is worth flagging (%)
+HIGH_CONCENTRATION_PCT = 50.0
+
 # =============================================================================
 # Fraud Scheme Detection (Banco Master Patterns)
 # =============================================================================

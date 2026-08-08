@@ -5,9 +5,10 @@ import numpy as np
 from typing import Optional, Tuple
 from config.settings import Config
 from config.constants import (
+    DIVERGENCE_SCORE_THRESHOLD,
+    HIGH_CONCENTRATION_PCT,
     PL_DROP_CRITICAL,
     REDEMPTION_RUN_DAYS,
-    ZSCORE_WARNING,
 )
 from src.analyzers.base import BaseAnalyzer
 from src.utils.statistics import calculate_z_scores
@@ -84,10 +85,15 @@ class AnomalyDetector(BaseAnalyzer):
             return pd.DataFrame()
 
         df = df.copy()
-        df = df.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
 
-        # Calcular variação percentual diária
-        df['PL_VAR_PCT'] = df.groupby('CNPJ_FUNDO')[pl_col].pct_change() * 100
+        # Sem CNPJ_FUNDO tratamos o frame como um unico fundo, igual a
+        # detect_flow_anomalies. Antes isso levantava KeyError no groupby.
+        if 'CNPJ_FUNDO' in df.columns:
+            df = df.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
+            df['PL_VAR_PCT'] = df.groupby('CNPJ_FUNDO')[pl_col].pct_change() * 100
+        else:
+            df = df.sort_values('DT_COMPTC')
+            df['PL_VAR_PCT'] = df[pl_col].pct_change() * 100
 
         # Identificar quedas significativas
         df['IS_PL_DROP'] = df['PL_VAR_PCT'] < -threshold_pct
@@ -108,26 +114,42 @@ class AnomalyDetector(BaseAnalyzer):
             return pd.DataFrame()
 
         df = df.copy()
-        df = df.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
+        has_fund_col = 'CNPJ_FUNDO' in df.columns
+
+        # Sem CNPJ_FUNDO tratamos o frame como um unico fundo, igual a
+        # detect_flow_anomalies. Antes isso levantava KeyError no groupby.
+        if has_fund_col:
+            df = df.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
+        else:
+            df = df.sort_values('DT_COMPTC')
 
         # Identificar dias de resgate líquido negativo
         df['IS_NEGATIVE_FLOW'] = df[flow_col] < 0
 
         # Contar sequências consecutivas
-        df['RUN_ID'] = (df.groupby('CNPJ_FUNDO')['IS_NEGATIVE_FLOW']
-                       .transform(lambda x: (x != x.shift()).cumsum()))
-
-        df['RUN_LENGTH'] = df.groupby(['CNPJ_FUNDO', 'RUN_ID']).cumcount() + 1
+        if has_fund_col:
+            df['RUN_ID'] = (df.groupby('CNPJ_FUNDO')['IS_NEGATIVE_FLOW']
+                           .transform(lambda x: (x != x.shift()).cumsum()))
+            df['RUN_LENGTH'] = df.groupby(['CNPJ_FUNDO', 'RUN_ID']).cumcount() + 1
+        else:
+            df['RUN_ID'] = (df['IS_NEGATIVE_FLOW'] != df['IS_NEGATIVE_FLOW'].shift()).cumsum()
+            df['RUN_LENGTH'] = df.groupby('RUN_ID').cumcount() + 1
 
         # Filtrar apenas runs significativas
         runs = df[(df['IS_NEGATIVE_FLOW']) & (df['RUN_LENGTH'] >= consecutive_days)].copy()
 
-        return runs.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
+        sort_cols = ['CNPJ_FUNDO', 'DT_COMPTC'] if has_fund_col else ['DT_COMPTC']
+        return runs.sort_values(sort_cols)
 
-    def detect_concentration_spikes(self, cda_df: pd.DataFrame,
-                                   threshold_pct: float = 50.0) -> pd.DataFrame:
+    def detect_high_concentration(self, cda_df: pd.DataFrame,
+                                  threshold_pct: float = HIGH_CONCENTRATION_PCT) -> pd.DataFrame:
         """
-        Detecta aumento brusco de concentração em poucos ativos
+        Detecta ativos individuais com participação alta na carteira
+
+        Compara cada ativo contra o total da carteira do fundo na mesma data.
+        Nao ha comparacao temporal: isto mede concentracao *no momento*, nao
+        aumento de concentracao. Para variacao ao longo do tempo use
+        src.analyzers.concentration.
 
         Requer dados de CDA
         """
@@ -149,12 +171,27 @@ class AnomalyDetector(BaseAnalyzer):
 
         return high_concentration.sort_values('PCT_CARTEIRA', ascending=False)
 
+    def detect_concentration_spikes(self, cda_df: pd.DataFrame,
+                                   threshold_pct: float = HIGH_CONCENTRATION_PCT) -> pd.DataFrame:
+        """Alias obsoleto de detect_high_concentration.
+
+        O nome antigo prometia deteccao de *aumento* de concentracao, que este
+        metodo nunca fez. Mantido para compatibilidade.
+        """
+        return self.detect_high_concentration(cda_df, threshold_pct=threshold_pct)
+
     def detect_divergence_flow_performance(self, df: pd.DataFrame,
-                                          threshold_z: float = ZSCORE_WARNING) -> pd.DataFrame:
+                                          threshold: float = DIVERGENCE_SCORE_THRESHOLD) -> pd.DataFrame:
         """
         Detecta divergência entre fluxo e performance
 
         Ex: entradas grandes em dias de performance ruim
+
+        Args:
+            df: Informe diário com VL_QUOTA, FLUXO_LIQ_DIA, CNPJ_FUNDO, DT_COMPTC
+            threshold: Corte para DIVERGENCE_SCORE. O score e o *produto* de dois
+                Z-scores (unidade z²), portanto o default 4.0 corresponde a ambas
+                as pernas em 2σ. Nao confundir com um limiar de Z-score simples.
         """
         required_cols = ['VL_QUOTA', 'FLUXO_LIQ_DIA', 'CNPJ_FUNDO', 'DT_COMPTC']
         if not all(col in df.columns for col in required_cols):
@@ -174,11 +211,12 @@ class AnomalyDetector(BaseAnalyzer):
             lambda x: calculate_z_scores(x, robust=False)
         )
 
-        # Divergência: fluxo e retorno em direções opostas com magnitudes altas
+        # Divergência: fluxo e retorno em direções opostas com magnitudes altas.
+        # Produto de dois Z-scores, logo a unidade e z² (ver docstring).
         df['DIVERGENCE_SCORE'] = -(df['Z_FLOW'] * df['Z_RETORNO'])  # negativo de produto = direções opostas
 
         # Filtrar apenas divergências significativas
-        divergences = df[df['DIVERGENCE_SCORE'] > threshold_z].copy()
+        divergences = df[df['DIVERGENCE_SCORE'] > threshold].copy()
 
         return divergences.sort_values('DIVERGENCE_SCORE', ascending=False)
 
@@ -198,16 +236,18 @@ class AnomalyDetector(BaseAnalyzer):
         )
 
         # 2. Quedas de PL
-        report['pl_drops'] = self.detect_pl_drops(df, threshold_pct=20.0)
+        report['pl_drops'] = self.detect_pl_drops(df, threshold_pct=PL_DROP_CRITICAL)
 
-        # 3. Runs (resgates consecutivos)
-        report['runs'] = self.detect_runs(df, consecutive_days=self.config.FLOW_WINDOW_DAYS)
+        # 3. Runs (resgates consecutivos).
+        # Usa REDEMPTION_RUN_DAYS, nao FLOW_WINDOW_DAYS: o segundo e o tamanho da
+        # janela movel de fluxo e nao tem relacao com duracao de um run.
+        report['runs'] = self.detect_runs(df, consecutive_days=REDEMPTION_RUN_DAYS)
 
         # 4. Divergência flow vs performance
         report['divergences'] = self.detect_divergence_flow_performance(df)
 
         # 5. Concentração (se CDA disponível)
         if cda_df is not None:
-            report['concentration_spikes'] = self.detect_concentration_spikes(cda_df)
+            report['concentration_spikes'] = self.detect_high_concentration(cda_df)
 
         return report

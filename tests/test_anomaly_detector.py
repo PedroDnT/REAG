@@ -156,3 +156,154 @@ def test_generate_anomaly_report_with_cda(detector):
     })
     report = detector.generate_anomaly_report(df, cda_df=cda_df)
     assert "concentration_spikes" in report
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for audit fixes
+# ---------------------------------------------------------------------------
+
+
+class TestMissingFundColumn:
+    """detect_pl_drops / detect_runs used to raise KeyError without CNPJ_FUNDO.
+
+    detect_flow_anomalies has always handled that case by treating the frame as
+    a single series; its two siblings went straight to groupby('CNPJ_FUNDO').
+    """
+
+    def test_detect_pl_drops_without_fund_column(self, detector):
+        df = pd.DataFrame({
+            "DT_COMPTC": pd.to_datetime(["2024-01-01", "2024-01-02"]),
+            "VL_PATRIM_LIQ": [100.0, 50.0],
+        })
+        result = detector.detect_pl_drops(df)
+        assert len(result) == 1
+        assert result["PL_VAR_PCT"].iloc[0] == pytest.approx(-50.0)
+
+    def test_detect_runs_without_fund_column(self, detector):
+        df = pd.DataFrame({
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=8),
+            "FLUXO_LIQ_DIA": [-1.0] * 8,
+        })
+        result = detector.detect_runs(df, consecutive_days=5)
+        # Days 5..8 of the run qualify.
+        assert len(result) == 4
+
+    def test_detect_runs_without_fund_column_resets_on_positive_flow(self, detector):
+        df = pd.DataFrame({
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=8),
+            "FLUXO_LIQ_DIA": [-1.0, -1.0, 5.0, -1.0, -1.0, -1.0, -1.0, -1.0],
+        })
+        # Longest negative streak after the reset is 5 days, so only its last day
+        # reaches RUN_LENGTH >= 5.
+        assert len(detector.detect_runs(df, consecutive_days=5)) == 1
+
+    def test_flow_anomalies_still_handles_missing_column(self, detector):
+        """The sibling that always worked must keep working."""
+        df = pd.DataFrame({"FLUXO_LIQ_DIA": [1.0] * 19 + [500.0]})
+        assert isinstance(detector.detect_flow_anomalies(df), pd.DataFrame)
+
+
+class TestReportUsesCorrectConstants:
+    """generate_anomaly_report passed FLOW_WINDOW_DAYS as a run length."""
+
+    def test_runs_use_redemption_run_days_not_flow_window(self, detector):
+        from config.constants import REDEMPTION_RUN_DAYS
+
+        # A 6-day redemption streak: caught at the intended 5-day threshold,
+        # missed at the 10-day FLOW_WINDOW_DAYS value that was wired in before.
+        df = pd.DataFrame({
+            "CNPJ_FUNDO": ["F1"] * 6,
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=6),
+            "VL_QUOTA": [1.0] * 6,
+            "VL_PATRIM_LIQ": [1_000_000] * 6,
+            "FLUXO_LIQ_DIA": [-100.0] * 6,
+        })
+        assert REDEMPTION_RUN_DAYS == 5
+        assert len(detector.generate_anomaly_report(df)["runs"]) > 0
+
+    def test_pl_drops_use_pl_drop_critical(self, detector, monkeypatch):
+        """The threshold must come from the constant, not a hardcoded 20.0."""
+        import src.analyzers.anomaly_detector as module
+
+        monkeypatch.setattr(module, "PL_DROP_CRITICAL", 60.0)
+        df = pd.DataFrame({
+            "CNPJ_FUNDO": ["F1"] * 3,
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=3),
+            "VL_QUOTA": [1.0] * 3,
+            "VL_PATRIM_LIQ": [1_000_000.0, 700_000.0, 690_000.0],  # -30% then -1.4%
+            "FLUXO_LIQ_DIA": [0.0] * 3,
+        })
+        # A 30% drop is below the patched 60% threshold, so raising the constant
+        # must suppress it. With the old literal it would still be reported.
+        assert len(detector.generate_anomaly_report(df)["pl_drops"]) == 0
+
+
+class TestDivergenceThreshold:
+    """DIVERGENCE_SCORE is a product of Z-scores (unit z^2), not a Z-score."""
+
+    def test_threshold_default_is_the_product_constant(self, detector):
+        import inspect
+
+        from config.constants import DIVERGENCE_SCORE_THRESHOLD
+
+        sig = inspect.signature(detector.detect_divergence_flow_performance)
+        assert sig.parameters["threshold"].default == DIVERGENCE_SCORE_THRESHOLD
+        assert DIVERGENCE_SCORE_THRESHOLD == 4.0
+
+    @pytest.fixture
+    def divergent_df(self):
+        """Fund data containing divergence scores on both sides of 2.0 and 4.0."""
+        n = 60
+        rng = np.random.default_rng(0)
+        flow = rng.normal(0, 1, n)
+        ret = rng.normal(0, 1, n)
+        flow[10], ret[10] = 1.6, -1.6   # mild opposite pair, score ~2.5
+        flow[20], ret[20] = 3.5, -3.5   # strong opposite pair, score well past 4
+        return pd.DataFrame({
+            "CNPJ_FUNDO": ["F1"] * n,
+            "DT_COMPTC": pd.date_range("2024-01-01", periods=n),
+            "VL_QUOTA": 1.0 + np.cumsum(ret) / 1000,
+            "FLUXO_LIQ_DIA": flow,
+        })
+
+    def test_scores_between_2_and_4_are_excluded(self, detector, divergent_df):
+        """Rows the old z-score cutoff admitted are now correctly excluded."""
+        lenient = detector.detect_divergence_flow_performance(divergent_df, threshold=2.0)
+        strict = detector.detect_divergence_flow_performance(divergent_df, threshold=4.0)
+
+        borderline = lenient[
+            (lenient["DIVERGENCE_SCORE"] > 2.0) & (lenient["DIVERGENCE_SCORE"] <= 4.0)
+        ]
+        assert not borderline.empty, "fixture must contain borderline rows to be meaningful"
+        assert len(strict) < len(lenient)
+        assert (strict["DIVERGENCE_SCORE"] > 4.0).all()
+
+    def test_strong_opposite_move_survives_the_stricter_threshold(self, detector, divergent_df):
+        result = detector.detect_divergence_flow_performance(divergent_df)
+        assert not result.empty
+        assert result["DIVERGENCE_SCORE"].max() > 4.0
+
+
+class TestConcentrationNaming:
+    """detect_concentration_spikes never detected a spike; it measured a level."""
+
+    @pytest.fixture
+    def cda_df(self):
+        return pd.DataFrame({
+            "CNPJ_FUNDO": ["F1"] * 3,
+            "DT_COMPTC": pd.to_datetime(["2024-01-01"] * 3),
+            "VL_MERC_POS_FINAL": [800_000, 150_000, 50_000],
+            "CD_ATIVO": ["A1", "A2", "A3"],
+        })
+
+    def test_detect_high_concentration_flags_dominant_asset(self, detector, cda_df):
+        result = detector.detect_high_concentration(cda_df)
+        assert len(result) == 1
+        assert result["CD_ATIVO"].iloc[0] == "A1"
+        assert result["PCT_CARTEIRA"].iloc[0] == pytest.approx(80.0)
+
+    def test_old_name_still_works_and_agrees(self, detector, cda_df):
+        pd.testing.assert_frame_equal(
+            detector.detect_concentration_spikes(cda_df),
+            detector.detect_high_concentration(cda_df),
+        )

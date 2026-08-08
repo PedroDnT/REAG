@@ -3,6 +3,8 @@ Statistical utilities for anomaly detection and analysis.
 
 Centralizes common statistical calculations used across analyzers.
 """
+import math
+
 import numpy as np
 import pandas as pd
 from typing import Optional
@@ -181,112 +183,87 @@ def winsorize(series: pd.Series,
 def chi2_cdf(x: float, df: int) -> float:
     """
     Calculate chi-square cumulative distribution function.
-    
-    Uses numerical approximation suitable for fraud detection purposes.
-    For df=8 (Benford's Law), provides accuracy within 0.1% of scipy.
-    
+
+    Evaluates the regularized lower incomplete gamma P(df/2, x/2) by series
+    expansion when x/2 < df/2 + 1, and via the complement of the continued
+    fraction otherwise -- the regime where the series converges too slowly.
+    Accurate to ~1e-12 for all degrees of freedom.
+
     Args:
         x: Chi-square statistic value
         df: Degrees of freedom
-        
+
     Returns:
         Cumulative probability P(X <= x)
     """
-    if x <= 0:
-        return 0.0
-    
     if df <= 0:
         raise ValueError("Degrees of freedom must be positive")
-    
-    k = df / 2.0
+
+    if x <= 0:
+        return 0.0
+
+    a = df / 2.0
     x_half = x / 2.0
 
-    # For large x, use asymptotic approximation
-    if x > 100:
-        return 1.0
+    if x_half < a + 1.0:
+        result = _lower_gamma_series(a, x_half)
+    else:
+        result = 1.0 - _upper_gamma_continued_fraction(a, x_half)
 
-    if x_half == 0:
-        return 0.0
-
-    # Regularized lower incomplete gamma P(k, x_half)
-    # P(a, x) = e^-x * x^a / Gamma(a) * sum_{n=0..inf}(x^n / Gamma(a+n+1))
-    log_prefactor = -x_half + k * np.log(x_half) - _log_gamma(k + 1.0)
-    if log_prefactor < -700:  # Underflow protection
-        return 0.0
-
-    term = 1.0
-    summation = 1.0
-    for n in range(1, 500):
-        term *= x_half / (k + n)
-        summation += term
-        if abs(term) < 1e-12 * abs(summation):
-            break
-
-    result = np.exp(log_prefactor) * summation
     return max(0.0, min(1.0, float(result)))
 
 
-def _log_gamma(x: float) -> float:
+def _lower_gamma_series(a: float, x: float) -> float:
+    """Regularized lower incomplete gamma P(a, x) by series expansion.
+
+    P(a, x) = e^-x * x^a / Gamma(a) * sum_{n=0..inf}(x^n / (a(a+1)...(a+n)))
+
+    Converges quickly for x < a + 1.
     """
-    Calculate log of gamma function using Stirling's approximation.
-    
-    Args:
-        x: Input value (must be positive)
-        
-    Returns:
-        Natural log of gamma(x)
-    """
-    if x <= 0:
-        raise ValueError("Gamma function undefined for non-positive values")
-    
-    # For small x, use lookup table for common values
-    if abs(x - 1.0) < 1e-10:
-        return 0.0  # gamma(1) = 1, log(1) = 0
-    if abs(x - 2.0) < 1e-10:
-        return 0.0  # gamma(2) = 1, log(1) = 0
-    if abs(x - 0.5) < 1e-10:
-        return 0.5 * np.log(np.pi)  # gamma(0.5) = sqrt(pi)
-    
-    # Stirling's approximation: log(gamma(x)) ≈ (x-0.5)*log(x) - x + 0.5*log(2*pi)
-    # Add correction terms for better accuracy
-    if x > 8:
-        # High accuracy Stirling with correction
-        log_sqrt_2pi = 0.5 * np.log(2 * np.pi)
-        return (x - 0.5) * np.log(x) - x + log_sqrt_2pi + _stirling_correction(x)
-    else:
-        # For smaller x, use recursion: gamma(x+1) = x * gamma(x)
-        # Shift to larger value, then subtract logs
-        n_shifts = int(9 - x)
-        x_shifted = x + n_shifts
-        
-        log_gamma_shifted = (x_shifted - 0.5) * np.log(x_shifted) - x_shifted + \
-                           0.5 * np.log(2 * np.pi) + _stirling_correction(x_shifted)
-        
-        # Subtract log(x * (x+1) * ... * (x+n-1))
-        correction = sum(np.log(x + i) for i in range(n_shifts))
-        
-        return log_gamma_shifted - correction
+    log_prefactor = -x + a * math.log(x) - math.lgamma(a)
+    if log_prefactor < -700:  # Underflow protection
+        return 0.0
+
+    term = 1.0 / a
+    summation = term
+    for n in range(1, 1000):
+        term *= x / (a + n)
+        summation += term
+        if abs(term) < 1e-15 * abs(summation):
+            break
+
+    return math.exp(log_prefactor) * summation
 
 
-def _stirling_correction(x: float) -> float:
+def _upper_gamma_continued_fraction(a: float, x: float) -> float:
+    """Regularized upper incomplete gamma Q(a, x) by continued fraction.
+
+    Modified Lentz algorithm. Converges quickly for x >= a + 1, the regime
+    where the series expansion in _lower_gamma_series stalls.
     """
-    Stirling's series correction term for log-gamma.
-    
-    Args:
-        x: Input value (should be > 8 for good accuracy)
-        
-    Returns:
-        Correction term
-    """
-    # First few terms of Stirling's series
-    # 1/(12*x) - 1/(360*x^3) + 1/(1260*x^5) - ...
-    x2 = x * x
-    
-    if x > 100:
-        # Only first term needed for large x
-        return 1.0 / (12.0 * x)
-    
-    # Include more terms for moderate x
-    return (1.0 / (12.0 * x) - 
-            1.0 / (360.0 * x * x2) + 
-            1.0 / (1260.0 * x * x2 * x2))
+    log_prefactor = -x + a * math.log(x) - math.lgamma(a)
+    if log_prefactor < -700:  # Underflow protection
+        return 0.0
+
+    tiny = 1e-300
+    b = x + 1.0 - a
+    c = 1.0 / tiny
+    d = 1.0 / b if b != 0.0 else 1.0 / tiny
+    h = d
+
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + an / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-15:
+            break
+
+    return math.exp(log_prefactor) * h

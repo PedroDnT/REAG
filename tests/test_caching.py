@@ -106,3 +106,79 @@ class TestCacheManager:
         path1 = cache._get_cache_path("key_a")
         path2 = cache._get_cache_path("key_b")
         assert path1 != path2
+
+
+class TestCachedDecoratorArguments:
+    """The cached() key used to ignore call arguments entirely.
+
+    Every call through a decorated function collided on one cache entry, so the
+    first result was returned for every subsequent input.
+    """
+
+    def test_different_positional_args_do_not_collide(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+
+        @cache.cached('square')
+        def square(n):
+            return n * n
+
+        assert square(2) == 4
+        assert square(5) == 25
+        assert square(9) == 81
+
+    def test_different_keyword_args_do_not_collide(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+
+        @cache.cached('add')
+        def add(a, b=0):
+            return a + b
+
+        assert add(1, b=2) == 3
+        assert add(1, b=9) == 10
+
+    def test_repeated_call_is_served_from_cache(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+        calls = []
+
+        @cache.cached('counted')
+        def tracked(n):
+            calls.append(n)
+            return n * 10
+
+        assert tracked(3) == 30
+        assert tracked(3) == 30
+        assert calls == [3], "second call should have been served from cache"
+
+    def test_kwarg_order_does_not_change_the_key(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+        calls = []
+
+        @cache.cached('kwargs')
+        def combine(a=1, b=2):
+            calls.append((a, b))
+            return a * 100 + b
+
+        assert combine(a=1, b=2) == 102
+        assert combine(b=2, a=1) == 102
+        assert len(calls) == 1
+
+    def test_no_args_uses_the_base_key(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+
+        @cache.cached('constant')
+        def value():
+            return 42
+
+        assert value() == 42
+        assert cache.get('constant') == 42
+
+    def test_decorator_preserves_function_metadata(self, tmp_path):
+        cache = CacheManager(cache_dir=tmp_path)
+
+        @cache.cached('documented')
+        def documented(n):
+            """Original docstring."""
+            return n
+
+        assert documented.__name__ == 'documented'
+        assert documented.__doc__ == 'Original docstring.'

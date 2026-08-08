@@ -1,5 +1,6 @@
 """Extended tests for CVM collector to improve coverage."""
 import pytest
+import requests
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 import pandas as pd
@@ -35,7 +36,7 @@ class TestCVMCollectorExtended:
         collector = CVMCollector()
         assert collector.config is not None
 
-    @patch('src.collectors.cvm_collector.requests.head')
+    @patch('requests.Session.head')
     def test_check_file_exists_success(self, mock_head, collector):
         """Test successful file existence check."""
         mock_response = Mock()
@@ -46,7 +47,7 @@ class TestCVMCollectorExtended:
         assert result is True
         mock_head.assert_called_once()
 
-    @patch('src.collectors.cvm_collector.requests.head')
+    @patch('requests.Session.head')
     def test_check_file_exists_not_found(self, mock_head, collector):
         """Test file existence check when file not found."""
         mock_response = Mock()
@@ -56,7 +57,7 @@ class TestCVMCollectorExtended:
         result = collector.check_file_exists("http://example.com/file.zip")
         assert result is False
 
-    @patch('src.collectors.cvm_collector.requests.head')
+    @patch('requests.Session.head')
     def test_check_file_exists_exception(self, mock_head, collector):
         """Test file existence check with network exception."""
         mock_head.side_effect = Exception("Network error")
@@ -147,7 +148,7 @@ class TestCVMCollectorExtended:
         # Should be empty since all months are in the future
         assert result == []
 
-    @patch('src.collectors.cvm_collector.requests.get')
+    @patch('requests.Session.get')
     def test_download_file_success(self, mock_get, collector, tmp_path):
         """Test successful file download."""
         mock_response = Mock()
@@ -162,7 +163,7 @@ class TestCVMCollectorExtended:
         assert result is True
         assert output_path.exists()
 
-    @patch('src.collectors.cvm_collector.requests.get')
+    @patch('requests.Session.get')
     def test_download_file_http_404(self, mock_get, collector, tmp_path):
         """Test download with HTTP 404 error (no retry)."""
         mock_response = Mock()
@@ -178,7 +179,7 @@ class TestCVMCollectorExtended:
         # Should not retry for 4xx errors
         assert mock_get.call_count == 1
 
-    @patch('src.collectors.cvm_collector.requests.get')
+    @patch('requests.Session.get')
     @patch('src.collectors.cvm_collector.time.sleep')
     def test_download_file_http_500_retry(self, mock_sleep, mock_get, collector, tmp_path):
         """Test download with HTTP 500 error (with retry)."""
@@ -196,7 +197,7 @@ class TestCVMCollectorExtended:
         # Should have exponential backoff
         assert mock_sleep.call_count >= 2
 
-    @patch('src.collectors.cvm_collector.requests.get')
+    @patch('requests.Session.get')
     @patch('src.collectors.cvm_collector.time.sleep')
     def test_download_file_generic_exception_retry(self, mock_sleep, mock_get, collector, tmp_path):
         """Test download with generic exception (with retry)."""
@@ -252,3 +253,81 @@ class TestCVMCollectorExtended:
 
         # Should handle the error gracefully
         assert result is None
+
+
+class TestPartialDownloadCleanup:
+    """A failed download must not leave a truncated file at the destination.
+
+    _download_and_extract_monthly_zip skips the download when the ZIP already
+    exists, so a truncated leftover poisoned that path permanently: every later
+    run would skip the download and then fail to extract.
+    """
+
+    @patch('requests.Session.get')
+    @patch('src.collectors.cvm_collector.time.sleep')
+    def test_stream_failure_leaves_no_destination_file(self, mock_sleep, mock_get, tmp_path):
+        collector = CVMCollector()
+
+        def exploding_chunks(chunk_size=8192):
+            yield b'partial data'
+            raise ConnectionError("connection reset mid-stream")
+
+        response = Mock()
+        response.raise_for_status = Mock()
+        response.headers = {'content-length': '999999'}
+        response.iter_content = exploding_chunks
+        mock_get.return_value = response
+
+        output = tmp_path / 'inf_diario_fi_202401.zip'
+        assert collector.download_file('http://example.com/f.zip', output) is False
+        assert not output.exists(), "truncated download must not be left in place"
+        assert not output.with_name(output.name + '.part').exists()
+
+    @patch('requests.Session.get')
+    def test_successful_download_writes_destination(self, mock_get, tmp_path):
+        collector = CVMCollector()
+        response = Mock()
+        response.raise_for_status = Mock()
+        response.headers = {'content-length': '4'}
+        response.iter_content = Mock(return_value=[b'data'])
+        mock_get.return_value = response
+
+        output = tmp_path / 'ok.zip'
+        assert collector.download_file('http://example.com/f.zip', output) is True
+        assert output.read_bytes() == b'data'
+        assert not output.with_name(output.name + '.part').exists()
+
+    @patch('requests.Session.get')
+    @patch('src.collectors.cvm_collector.time.sleep')
+    def test_http_error_leaves_no_destination_file(self, mock_sleep, mock_get, tmp_path):
+        collector = CVMCollector()
+        error_response = Mock()
+        error_response.status_code = 404
+        response = Mock()
+        response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=error_response
+        )
+        mock_get.return_value = response
+
+        output = tmp_path / 'missing.zip'
+        assert collector.download_file('http://example.com/f.zip', output) is False
+        assert not output.exists()
+
+
+class TestDownloadPeriodDefaults:
+    """download_period used a mutable list as its default argument."""
+
+    def test_default_data_types_is_immutable(self):
+        import inspect
+
+        default = inspect.signature(CVMCollector.download_period).parameters['data_types'].default
+        assert default is None
+        assert isinstance(CVMCollector.DEFAULT_DATA_TYPES, tuple)
+
+    @patch.object(CVMCollector, 'download_cadastro')
+    @patch.object(CVMCollector, 'check_file_exists', return_value=False)
+    def test_omitting_data_types_downloads_the_defaults(self, mock_exists, mock_cadastro):
+        mock_cadastro.return_value = None
+        collector = CVMCollector()
+        collector.download_period(2024, 1, 2024, 1)
+        mock_cadastro.assert_called_once()

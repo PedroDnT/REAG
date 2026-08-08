@@ -1,4 +1,7 @@
 """Additional tests for statistical utilities to improve coverage."""
+import math
+from decimal import Decimal, getcontext
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,9 +14,29 @@ from src.utils.statistics import (
     calculate_pct_change,
     winsorize,
     chi2_cdf,
-    _log_gamma,
-    _stirling_correction,
 )
+
+
+def chi2_cdf_exact(x: float, df: int) -> float:
+    """Reference chi-square CDF for even *df*, via the exact closed form.
+
+    For even df the shape parameter a = df/2 is an integer and
+
+        P(a, x) = 1 - e^-x * sum_{k=0}^{a-1} x^k / k!
+
+    Evaluated in high-precision Decimal so it stays exact for large df, where
+    the float factorials would overflow.
+    """
+    getcontext().prec = 60
+    a = df // 2
+    xd = Decimal(x) / 2
+    total = Decimal(0)
+    term = Decimal(1)
+    for k in range(a):
+        if k:
+            term = term * xd / k
+        total += term
+    return float(1 - (-xd).exp() * total)
 
 
 class TestCalculateZScoresRobust:
@@ -241,62 +264,54 @@ class TestChi2CDF:
         assert 0.0 <= result <= 1.0
 
 
-class TestLogGamma:
-    """Test log-gamma function."""
+class TestChi2CdfAccuracy:
+    """chi2_cdf must match the exact distribution, not just look plausible.
 
-    def test_log_gamma_one(self):
-        """Test log-gamma at x=1."""
-        result = _log_gamma(1.0)
-        assert abs(result - 0.0) < 1e-10
+    The previous implementation short-circuited ``if x > 100: return 1.0``,
+    ignoring df entirely, and was validated against a hand-written reference
+    table whose values were wrong.
+    """
 
-    def test_log_gamma_two(self):
-        """Test log-gamma at x=2."""
-        result = _log_gamma(2.0)
-        assert abs(result - 0.0) < 1e-10
+    @pytest.mark.parametrize("df", [2, 4, 8, 16, 50, 100, 200, 400])
+    @pytest.mark.parametrize(
+        "x", [0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 25.0, 60.0, 99.0, 101.0, 150.0, 400.0]
+    )
+    def test_matches_exact_closed_form(self, x, df):
+        assert chi2_cdf(x, df) == pytest.approx(chi2_cdf_exact(x, df), abs=1e-10)
 
-    def test_log_gamma_half(self):
-        """Test log-gamma at x=0.5."""
-        result = _log_gamma(0.5)
-        expected = 0.5 * np.log(np.pi)
-        assert abs(result - expected) < 1e-10
+    def test_no_discontinuity_at_x_100(self):
+        """Regression: df=200 used to jump 0.0 -> 1.0 between x=100 and x=101.
 
-    def test_log_gamma_large_value(self):
-        """Test log-gamma with large value."""
-        result = _log_gamma(10.0)
-        # gamma(10) = 9! = 362880, log(362880) ≈ 12.8
-        assert result > 10.0
+        The true CDF there is ~1e-11, i.e. essentially zero on both sides.
+        """
+        below = chi2_cdf(100.0, 200)
+        above = chi2_cdf(101.0, 200)
+        assert abs(above - below) < 1e-6
+        assert above < 0.01
 
-    def test_log_gamma_small_value(self):
-        """Test log-gamma with small value (uses recursion)."""
-        result = _log_gamma(2.5)
-        assert result > 0.0
+    def test_large_x_does_not_saturate_for_large_df(self):
+        """x > 100 must not be reported as certainty when df is large."""
+        assert chi2_cdf(150.0, 200) == pytest.approx(0.003352, abs=1e-5)
+        assert chi2_cdf(150.0, 300) < 1e-10
 
-    def test_log_gamma_invalid_input(self):
-        """Test log-gamma with invalid (non-positive) input."""
-        with pytest.raises(ValueError, match="Gamma function undefined"):
-            _log_gamma(0)
-        with pytest.raises(ValueError, match="Gamma function undefined"):
-            _log_gamma(-1)
+    @pytest.mark.parametrize("df", [1, 2, 8, 33, 200])
+    def test_monotone_non_decreasing(self, df):
+        values = [chi2_cdf(x / 10, df) for x in range(0, 3001)]
+        assert all(b >= a - 1e-12 for a, b in zip(values, values[1:]))
 
+    @pytest.mark.parametrize("df", [1, 8, 200])
+    def test_bounds(self, df):
+        assert chi2_cdf(0.0, df) == 0.0
+        assert chi2_cdf(-1.0, df) == 0.0
+        assert chi2_cdf(1e9, df) == pytest.approx(1.0)
 
-class TestStirlingCorrection:
-    """Test Stirling correction term."""
+    def test_odd_df_against_erf(self):
+        """df=1 has the closed form P(X<=x) = erf(sqrt(x/2))."""
+        for x in (0.1, 1.0, 3.84, 10.0, 150.0):
+            assert chi2_cdf(x, 1) == pytest.approx(math.erf(math.sqrt(x / 2)), abs=1e-10)
 
-    def test_stirling_correction_large_x(self):
-        """Test Stirling correction with large x."""
-        result = _stirling_correction(150)
-        # For large x, only first term is used
-        expected = 1.0 / (12.0 * 150)
-        assert abs(result - expected) < 1e-10
-
-    def test_stirling_correction_moderate_x(self):
-        """Test Stirling correction with moderate x."""
-        result = _stirling_correction(20)
-        # Should include multiple terms
-        assert result > 0.0
-        assert result < 1.0
-
-    def test_stirling_correction_small_x(self):
-        """Test Stirling correction with small x (around threshold)."""
-        result = _stirling_correction(10)
-        assert result > 0.0
+    def test_median_approximation(self):
+        """The median of chi2(df) is near df*(1 - 2/(9df))^3."""
+        for df in (4, 8, 20, 100):
+            median = df * (1 - 2 / (9 * df)) ** 3
+            assert chi2_cdf(median, df) == pytest.approx(0.5, abs=0.01)

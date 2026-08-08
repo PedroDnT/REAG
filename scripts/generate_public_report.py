@@ -46,6 +46,7 @@ Benefits:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -234,11 +235,18 @@ class HtmlRenderer(ReportRenderer):
     """Render report data as HTML."""
     
     def render(self, data: ReportData) -> str:
-        """Render report to HTML format."""
-        title = data.metadata.title
+        """Render report to HTML format.
+
+        Text fields are HTML-escaped: they originate from configuration and from
+        CSV inputs, neither of which is trusted to be markup-safe.
+        """
+        title = html.escape(str(data.metadata.title))
+        generation_date = html.escape(str(data.metadata.generation_date))
+        methodology_text = html.escape(str(data.methodology_text))
+        disclaimer_text = html.escape(str(data.disclaimer_text))
         total = data.executive_summary.total_anomalies
         funds = data.executive_summary.unique_funds_affected
-        
+
         return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -256,7 +264,7 @@ class HtmlRenderer(ReportRenderer):
   </head>
   <body>
     <h1>{title}</h1>
-    <p class="muted">Generated: {data.metadata.generation_date}</p>
+    <p class="muted">Generated: {generation_date}</p>
 
     <h2>Executive Summary</h2>
     <p class="muted">Results Obtained</p>
@@ -275,11 +283,11 @@ class HtmlRenderer(ReportRenderer):
     <h2>Methodology</h2>
     <p class="muted">Methods</p>
     <p>
-      {data.methodology_text}
+      {methodology_text}
     </p>
     <h2>Disclaimer</h2>
     <p>
-      {data.disclaimer_text}
+      {disclaimer_text}
     </p>
   </body>
 </html>

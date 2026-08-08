@@ -2,6 +2,7 @@
 import json
 import pytest
 import pandas as pd
+from dataclasses import replace
 from html.parser import HTMLParser
 
 from scripts.generate_public_report import (
@@ -555,3 +556,42 @@ class TestRendererImmutability:
         assert data.datasets.pl_drops.equals(data_before.datasets.pl_drops), "PL drops DataFrame should not be modified"
         assert data.datasets.runs.equals(data_before.datasets.runs), "Runs DataFrame should not be modified"
         assert data.datasets.divergences.equals(data_before.datasets.divergences), "Divergences DataFrame should not be modified"
+
+
+class TestHtmlRendererEscaping:
+    """HtmlRenderer interpolated text straight into an f-string template.
+
+    Title and methodology/disclaimer text come from configuration and from CSV
+    inputs, neither of which is guaranteed to be markup-safe.
+    """
+
+    @staticmethod
+    def _render(sample_report_data, **overrides):
+        """Render sample data with selected text fields overridden."""
+        data = replace(sample_report_data, **{
+            k: v for k, v in overrides.items()
+            if k in {"methodology_text", "disclaimer_text"}
+        })
+        if "title" in overrides:
+            data = replace(data, metadata=replace(data.metadata, title=overrides["title"]))
+        return HtmlRenderer().render(data)
+
+    def test_script_tag_in_title_is_escaped(self, sample_report_data):
+        html_out = self._render(sample_report_data, title="<script>alert('x')</script>")
+        assert "<script>" not in html_out
+        assert "&lt;script&gt;" in html_out
+
+    def test_angle_brackets_in_methodology_are_escaped(self, sample_report_data):
+        html_out = self._render(sample_report_data, methodology_text="a < b and c > d")
+        assert "a &lt; b and c &gt; d" in html_out
+
+    def test_quotes_in_disclaimer_are_escaped(self, sample_report_data):
+        html_out = self._render(sample_report_data, disclaimer_text='he said "hi" & left')
+        assert "&amp;" in html_out
+        assert '"hi"' not in html_out
+
+    def test_document_structure_survives_escaping(self, sample_report_data):
+        html_out = self._render(sample_report_data, title="Plain Title")
+        assert html_out.startswith("<!DOCTYPE html>")
+        assert "<h1>Plain Title</h1>" in html_out
+        assert html_out.rstrip().endswith("</html>")

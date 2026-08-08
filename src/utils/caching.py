@@ -2,6 +2,7 @@
 Caching utilities for expensive operations.
 """
 
+import functools
 import json
 import logging
 import pickle
@@ -129,10 +130,15 @@ class CacheManager:
         format: str = 'json'
     ) -> Callable:
         """
-        Decorator to cache function results.
+        Decorator to cache function results, keyed by *key* plus call arguments.
+
+        Arguments participate in the cache key, so distinct calls do not collide.
+        Arguments must have a stable ``repr`` for this to be sound; callers
+        passing unhashable or non-deterministically-repr'd values should cache
+        manually via :meth:`get` / :meth:`set` instead.
 
         Args:
-            key: Cache key
+            key: Base cache key, namespacing this function's entries
             max_age: Maximum age of cached value
             format: Format to use ('json' or 'pickle')
 
@@ -140,9 +146,12 @@ class CacheManager:
             Decorator function
         """
         def decorator(func: Callable) -> Callable:
+            @functools.wraps(func)
             def wrapper(*args, **kwargs):
+                call_key = self._build_call_key(key, args, kwargs)
+
                 # Try to get from cache
-                cached_value = self.get(key, max_age, format)
+                cached_value = self.get(call_key, max_age, format)
                 if cached_value is not None:
                     return cached_value
 
@@ -150,12 +159,21 @@ class CacheManager:
                 result = func(*args, **kwargs)
 
                 # Cache result
-                self.set(key, result, format)
+                self.set(call_key, result, format)
 
                 return result
 
             return wrapper
         return decorator
+
+    @staticmethod
+    def _build_call_key(key: str, args: tuple, kwargs: dict) -> str:
+        """Derive a cache key from a base key plus the call's arguments."""
+        if not args and not kwargs:
+            return key
+        payload = repr(args) + repr(sorted(kwargs.items()))
+        digest = hashlib.sha256(payload.encode()).hexdigest()[:16]
+        return f"{key}:{digest}"
 
     def get_cache_info(self) -> dict:
         """

@@ -1,6 +1,7 @@
 import pytest
 import pandas as pd
 from pathlib import Path
+from unittest.mock import patch
 import json
 import tempfile
 import shutil
@@ -337,20 +338,26 @@ def test_malformed_csv_handling(temp_config, caplog):
     assert any('Failed to parse CSV file' in record.message for record in caplog.records)
 
 
-def test_file_write_failure_raises_ioerror(generator_with_data):
-    """Test that file write failures raise IOError with descriptive message"""
-    # Try to write to an invalid path (e.g., directory that can't be created)
-    invalid_path = '/root/invalid_path/report.md'
-    
-    with pytest.raises(IOError) as exc_info:
-        generator_with_data.generate_report(
-            output_format='markdown',
-            output_file=invalid_path
-        )
-    
+def test_file_write_failure_raises_ioerror(generator_with_data, tmp_path):
+    """Test that file write failures raise IOError with descriptive message.
+
+    The write failure is mocked rather than provoked with a real unwritable
+    path: the previous version targeted /root/invalid_path, which is writable
+    when the suite runs as root (e.g. in a container), so the test silently
+    inverted depending on the uid.
+    """
+    target = str(tmp_path / 'report.md')
+
+    with patch.object(Path, 'write_text', side_effect=OSError("disk on fire")):
+        with pytest.raises(IOError) as exc_info:
+            generator_with_data.generate_report(
+                output_format='markdown',
+                output_file=target
+            )
+
     # Check that error message is descriptive
     assert 'Failed to write report' in str(exc_info.value)
-    assert invalid_path in str(exc_info.value)
+    assert target in str(exc_info.value)
 
 
 def test_incomplete_summary_dict_raises_keyerror(generator_with_data):
@@ -397,33 +404,24 @@ def test_incomplete_severity_distribution_raises_keyerror(generator_with_data):
     assert 'severity distribution missing required key' in str(exc_info.value).lower()
 
 
-def test_file_write_with_readonly_directory(temp_config):
-    """Test file write failure when directory is read-only"""
-    import os
-    import stat
-    
-    # Create a read-only directory
-    readonly_dir = temp_config.REPORTS_DIR / 'readonly'
-    readonly_dir.mkdir(exist_ok=True)
-    
-    # Make directory read-only (skip on Windows where this is complex)
-    if os.name != 'nt':
-        os.chmod(readonly_dir, stat.S_IRUSR | stat.S_IXUSR)
-        
-        generator = PublicReportGenerator(config=temp_config)
-        output_file = readonly_dir / 'report.md'
-        
-        try:
-            with pytest.raises(IOError) as exc_info:
-                generator.generate_report(
-                    output_format='markdown',
-                    output_file=str(output_file)
-                )
-            
-            assert 'Failed to write report' in str(exc_info.value)
-        finally:
-            # Restore permissions for cleanup
-            os.chmod(readonly_dir, stat.S_IRWXU)
+def test_file_write_permission_error_is_wrapped(temp_config):
+    """A PermissionError from the filesystem surfaces as a descriptive IOError.
+
+    Mocked rather than driven by chmod: root ignores the permission bits, so
+    the chmod-based version of this test could not fail as intended when the
+    suite runs as root.
+    """
+    output_file = temp_config.REPORTS_DIR / 'readonly' / 'report.md'
+    generator = PublicReportGenerator(config=temp_config)
+
+    with patch.object(Path, 'write_text', side_effect=PermissionError("Permission denied")):
+        with pytest.raises(IOError) as exc_info:
+            generator.generate_report(
+                output_format='markdown',
+                output_file=str(output_file)
+            )
+
+    assert 'Failed to write report' in str(exc_info.value)
 
 
 def test_empty_csv_files_handled_gracefully(temp_config):

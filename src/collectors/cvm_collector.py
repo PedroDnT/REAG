@@ -1,9 +1,10 @@
 import logging
+import os
 
 import requests
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Sequence, Tuple
 from datetime import date, datetime
 from tqdm import tqdm
 import zipfile
@@ -16,8 +17,14 @@ logger = logging.getLogger(__name__)
 class CVMCollector:
     """Coletor de dados da CVM (Informe Diário, CDA, Cadastro)"""
 
+    #: Tipos de dado baixados por download_period quando nenhum e especificado.
+    DEFAULT_DATA_TYPES: Tuple[str, ...] = ('informe_diario', 'cda', 'cadastro')
+
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
+        # Uma sessao reaproveita conexoes TCP entre os muitos HEAD/GET que
+        # get_available_months e download_period disparam contra o mesmo host.
+        self._session = requests.Session()
         self._ensure_directories()
 
     def _ensure_directories(self):
@@ -36,7 +43,7 @@ class CVMCollector:
             True se arquivo existe (HTTP 200), False caso contrário
         """
         try:
-            response = requests.head(url, timeout=10, allow_redirects=True)
+            response = self._session.head(url, timeout=10, allow_redirects=True)
             return response.status_code == 200
         except Exception as e:
             logger.error(f"Erro ao verificar {url}: {e}")
@@ -104,22 +111,30 @@ class CVMCollector:
         Returns:
             True se sucesso, False caso contrário
         """
+        # Baixa para um arquivo temporario e so move para o destino final apos
+        # sucesso. Caso contrario uma falha no meio do stream deixava um ZIP
+        # truncado que _download_and_extract_monthly_zip tratava como ja baixado,
+        # quebrando o download permanentemente ate limpeza manual.
+        part_path = output_path.with_name(output_path.name + '.part')
+
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, stream=True, timeout=30)
+                response = self._session.get(url, stream=True, timeout=self.config.DOWNLOAD_TIMEOUT)
                 response.raise_for_status()
 
                 total_size = int(response.headers.get('content-length', 0))
 
-                with open(output_path, 'wb') as f:
+                with open(part_path, 'wb') as f:
                     with tqdm(total=total_size, unit='B', unit_scale=True, desc=output_path.name) as pbar:
                         for chunk in response.iter_content(chunk_size=8192):
                             f.write(chunk)
                             pbar.update(len(chunk))
 
+                os.replace(part_path, output_path)
                 return True
 
             except requests.exceptions.HTTPError as e:
+                part_path.unlink(missing_ok=True)
                 # Erros 4xx (cliente) não devem ter retry
                 if 400 <= e.response.status_code < 500:
                     logger.error(f"Erro HTTP {e.response.status_code}: {url}")
@@ -136,6 +151,7 @@ class CVMCollector:
                     return False
 
             except Exception as e:
+                part_path.unlink(missing_ok=True)
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     logger.warning(f"Erro: {e}. Tentando novamente em {wait_time}s...")
@@ -144,6 +160,7 @@ class CVMCollector:
                     logger.error(f"Erro ao baixar {url}: {e}")
                     return False
 
+        part_path.unlink(missing_ok=True)
         return False
 
     def extract_zip(self, zip_path: Path, extract_to: Optional[Path] = None) -> Optional[Path]:
@@ -264,7 +281,7 @@ class CVMCollector:
 
     def download_period(self, start_year: int, start_month: int,
                        end_year: int, end_month: int,
-                       data_types: List[str] = ['informe_diario', 'cda', 'cadastro'],
+                       data_types: Optional[Sequence[str]] = None,
                        check_availability: bool = True):
         """
         Baixa dados para um período completo
@@ -272,9 +289,12 @@ class CVMCollector:
         Args:
             start_year, start_month: Período inicial
             end_year, end_month: Período final
-            data_types: Tipos de dados para baixar
+            data_types: Tipos de dados para baixar (default: DEFAULT_DATA_TYPES)
             check_availability: Se True, verifica disponibilidade antes de baixar
         """
+        if data_types is None:
+            data_types = self.DEFAULT_DATA_TYPES
+
         if start_year > end_year or (start_year == end_year and start_month > end_month):
             raise ValueError(
                 f"Start ({start_year}-{start_month:02d}) must be before "
