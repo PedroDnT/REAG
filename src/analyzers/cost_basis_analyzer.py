@@ -9,7 +9,7 @@ Detects fraud signals from VL_CUSTO_POS_FINAL (cost basis) patterns:
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd

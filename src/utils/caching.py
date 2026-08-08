@@ -7,7 +7,8 @@ import json
 import logging
 import pickle
 from pathlib import Path
-from typing import Any, Optional, Callable
+from typing import Any
+from collections.abc import Callable
 from datetime import datetime, timedelta
 import hashlib
 
@@ -48,9 +49,9 @@ class CacheManager:
     def get(
         self,
         key: str,
-        max_age: Optional[timedelta] = None,
+        max_age: timedelta | None = None,
         format: str = 'json'
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         Get value from cache.
 
@@ -79,9 +80,9 @@ class CacheManager:
                 with open(cache_path, 'rb') as f:
                     return pickle.load(f)
             else:
-                with open(cache_path, 'r') as f:
+                with open(cache_path) as f:
                     return json.load(f)
-        except (IOError, pickle.PickleError, json.JSONDecodeError):
+        except (OSError, pickle.PickleError, json.JSONDecodeError):
             return None
 
     def set(self, key: str, value: Any, format: str = 'json') -> None:
@@ -102,10 +103,10 @@ class CacheManager:
             else:
                 with open(cache_path, 'w') as f:
                     json.dump(value, f, indent=2, default=str)
-        except (IOError, pickle.PickleError, TypeError) as exc:
+        except (OSError, pickle.PickleError, TypeError) as exc:
             logger.warning("Cache write failed for key %s: %s", key, exc)
 
-    def clear(self, key: Optional[str] = None) -> None:
+    def clear(self, key: str | None = None) -> None:
         """
         Clear cache.
 
@@ -126,7 +127,7 @@ class CacheManager:
     def cached(
         self,
         key: str,
-        max_age: Optional[timedelta] = None,
+        max_age: timedelta | None = None,
         format: str = 'json'
     ) -> Callable:
         """

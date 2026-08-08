@@ -28,7 +28,7 @@ if cadastro_files:
 else:
     print("❌ Nenhum arquivo de cadastro encontrado")
     print(f"   Procurado em: {config.RAW_DATA_DIR}")
-    print(f"   Padrão: cad_fi*.csv")
+    print("   Padrão: cad_fi*.csv")
 
 # Check Informe Diário
 print("\n📂 Procurando Informe Diário...")
@@ -47,7 +47,7 @@ if informe_files:
 else:
     print("❌ Nenhum arquivo de informe encontrado")
     print(f"   Procurado em: {config.RAW_DATA_DIR}")
-    print(f"   Padrão: inf_diario_fi_*.csv")
+    print("   Padrão: inf_diario_fi_*.csv")
 
 # Check CDA
 print("\n📂 Procurando CDA...")
@@ -66,7 +66,7 @@ if cda_files:
 else:
     print("❌ Nenhum arquivo de CDA encontrado")
     print(f"   Procurado em: {config.RAW_DATA_DIR}")
-    print(f"   Padrão: cda_*.csv")
+    print("   Padrão: cda_*.csv")
 
 print("\n" + "="*70)
 

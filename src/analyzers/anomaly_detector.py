@@ -1,8 +1,6 @@
 import logging
 
 import pandas as pd
-import numpy as np
-from typing import Optional, Tuple
 from config.settings import Config
 from config.constants import (
     DIVERGENCE_SCORE_THRESHOLD,
@@ -19,7 +17,7 @@ logger = logging.getLogger(__name__)
 class AnomalyDetector(BaseAnalyzer):
     """Detector de anomalias em dados de fundos"""
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Config | None = None):
         super().__init__(config=config)
         self.config = config or Config()
 
@@ -27,7 +25,7 @@ class AnomalyDetector(BaseAnalyzer):
         """Wrapper for z-score calculation utility."""
         return calculate_z_scores(series, robust=robust)
 
-    def analyze(self, df: pd.DataFrame, cda_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def analyze(self, df: pd.DataFrame, cda_df: pd.DataFrame | None = None) -> pd.DataFrame:
         """
         Perform anomaly analysis on fund data.
 
@@ -221,7 +219,7 @@ class AnomalyDetector(BaseAnalyzer):
         return divergences.sort_values('DIVERGENCE_SCORE', ascending=False)
 
     def generate_anomaly_report(self, df: pd.DataFrame,
-                               cda_df: Optional[pd.DataFrame] = None) -> dict:
+                               cda_df: pd.DataFrame | None = None) -> dict:
         """
         Gera relatório completo de anomalias
 

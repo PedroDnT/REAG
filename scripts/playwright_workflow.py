@@ -11,7 +11,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
@@ -23,15 +23,15 @@ LOGGER = logging.getLogger(__name__)
 class WorkflowConfig:
   base_url: str
   headless: bool
-  username: Optional[str]
-  password: Optional[str]
-  username_selector: Optional[str]
-  password_selector: Optional[str]
-  submit_selector: Optional[str]
-  post_login_selector: Optional[str]
-  navigation_selector: Optional[str]
-  navigation_wait_selector: Optional[str]
-  screenshot_path: Optional[Path]
+  username: str | None
+  password: str | None
+  username_selector: str | None
+  password_selector: str | None
+  submit_selector: str | None
+  post_login_selector: str | None
+  navigation_selector: str | None
+  navigation_wait_selector: str | None
+  screenshot_path: Path | None
 
 
 def configure_logging() -> None:
@@ -83,7 +83,7 @@ def retry(action: Callable[[], None], label: str, attempts: int = 3, delay_s: fl
     raise last_error
 
 
-def maybe_fill(page, selector: Optional[str], value: Optional[str], label: str) -> None:
+def maybe_fill(page, selector: str | None, value: str | None, label: str) -> None:
   if not selector or not value:
     LOGGER.info("%s não configurado; pulando.", label)
     return
@@ -91,7 +91,7 @@ def maybe_fill(page, selector: Optional[str], value: Optional[str], label: str) 
   page.fill(selector, value)
 
 
-def maybe_click(page, selector: Optional[str], label: str) -> None:
+def maybe_click(page, selector: str | None, label: str) -> None:
   if not selector:
     LOGGER.info("%s não configurado; pulando.", label)
     return

@@ -9,7 +9,6 @@ import logging
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional
 from pathlib import Path
 from datetime import datetime, timedelta
 import time
@@ -37,7 +36,7 @@ class MarketDataValidator:
     3. Estimativas (quando dados não disponíveis)
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Path | None = None):
         """
         Args:
             cache_dir: Diretório para cache de preços
@@ -58,8 +57,10 @@ class MarketDataValidator:
                 # Vectorized conversion: convert date column to date objects and create dict
                 df['date'] = pd.to_datetime(df['date']).dt.date
                 # Use vectorized set_index + to_dict for much faster dictionary creation
-                self.price_cache = {(ticker, date): price 
-                                   for ticker, date, price in zip(df['ticker'], df['date'], df['price'])}
+                self.price_cache = {(ticker, date): price
+                                   for ticker, date, price in zip(
+                                       df['ticker'], df['date'], df['price'], strict=True
+                                   )}
                 logger.info(f"Cache carregado: {len(self.price_cache):,} precos")
             except Exception as e:
                 logger.warning(f"Erro ao carregar cache: {e}")
@@ -78,7 +79,7 @@ class MarketDataValidator:
             df.to_csv(cache_file, index=False)
             logger.info(f"Cache salvo: {len(records):,} precos")
 
-    def get_market_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def get_market_price(self, ticker: str, date: datetime.date) -> float | None:
         """
         Busca preço de mercado para um ativo
 
@@ -105,7 +106,7 @@ class MarketDataValidator:
 
         return None
 
-    def get_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def get_price(self, ticker: str, date: datetime.date) -> float | None:
         """Backward-compatible alias for get_market_price."""
         return self.get_market_price(ticker, date)
 
@@ -113,11 +114,11 @@ class MarketDataValidator:
         """Convert B3 ticker to Yahoo format."""
         return ticker if ticker.endswith(".SA") else f"{ticker}.SA"
 
-    def _fetch_price_yahoo(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def _fetch_price_yahoo(self, ticker: str, date: datetime.date) -> float | None:
         """Backward-compatible alias for Yahoo fetch method."""
         return self._fetch_yahoo_price(ticker, date)
 
-    def _fetch_yahoo_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def _fetch_yahoo_price(self, ticker: str, date: datetime.date) -> float | None:
         """
         Busca preço no Yahoo Finance
 
@@ -181,7 +182,7 @@ class MarketDataValidator:
             return validated_df.copy()
         return validated_df[validated_df['price_deviation_pct'].abs() > threshold].copy()
 
-    def generate_report(self, validated_df: pd.DataFrame) -> Dict[str, object]:
+    def generate_report(self, validated_df: pd.DataFrame) -> dict[str, object]:
         """Backward-compatible reporting API used by tests."""
         anomalies = self.detect_anomalies(validated_df)
         return {
@@ -193,7 +194,7 @@ class MarketDataValidator:
         }
 
     def validate_portfolio_prices(self, cda_df: pd.DataFrame,
-                                  sample_size: Optional[int] = None) -> pd.DataFrame:
+                                  sample_size: int | None = None) -> pd.DataFrame:
         """
         Valida preços de um portfolio
 
@@ -286,7 +287,7 @@ class MarketDataValidator:
         # Salvar cache
         self._save_cache()
 
-        logger.info(f"Validacao concluida:")
+        logger.info("Validacao concluida:")
         logger.info(f"   Precos encontrados: {result_df['has_market_price'].sum():,}")
         logger.info(f"   Precos nao encontrados: {(~result_df['has_market_price']).sum():,}")
 
@@ -338,8 +339,8 @@ class MarketDataValidator:
         return suspicious
 
     def generate_price_report(self, cda_df: pd.DataFrame,
-                             sample_size: Optional[int] = 1000,
-                             output_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+                             sample_size: int | None = 1000,
+                             output_path: Path | None = None) -> dict[str, pd.DataFrame]:
         """
         Gera relatório completo de validação de preços
 

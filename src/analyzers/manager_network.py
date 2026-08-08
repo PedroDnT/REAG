@@ -9,7 +9,7 @@ Detects fraud signals from CNPJ_GESTOR (fund manager) relationships:
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -26,8 +26,8 @@ class ManagerNetworkAnalyzer(BaseAnalyzer):
     def analyze(
         self,
         cadastro_df: pd.DataFrame,
-        cda_df: Optional[pd.DataFrame] = None,
-        informe_df: Optional[pd.DataFrame] = None,
+        cda_df: pd.DataFrame | None = None,
+        informe_df: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         self.validate_dataframe(
             cadastro_df,
@@ -82,7 +82,7 @@ class ManagerNetworkAnalyzer(BaseAnalyzer):
     def _detect_manager_concentration(
         self,
         cadastro_df: pd.DataFrame,
-        informe_df: Optional[pd.DataFrame],
+        informe_df: pd.DataFrame | None,
     ) -> list[dict[str, Any]]:
         findings: list[dict[str, Any]] = []
         if informe_df is None or informe_df.empty:

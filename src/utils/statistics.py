@@ -7,24 +7,23 @@ import math
 
 import numpy as np
 import pandas as pd
-from typing import Optional
 
 
-def calculate_z_scores(series: pd.Series, 
+def calculate_z_scores(series: pd.Series,
                       robust: bool = False) -> pd.Series:
     """
     Calculate Z-scores for a series.
-    
+
     Args:
         series: Numeric series
         robust: If True, use median and MAD instead of mean and std
-        
+
     Returns:
         Series of Z-scores
     """
     if len(series) == 0:
         return pd.Series(dtype=float)
-    
+
     if robust:
         median = series.median()
         mad = calculate_mad(series)
@@ -42,58 +41,58 @@ def calculate_z_scores(series: pd.Series,
 def calculate_mad(series: pd.Series) -> float:
     """
     Calculate Median Absolute Deviation (MAD).
-    
+
     MAD is a robust measure of variability.
-    
+
     Args:
         series: Numeric series
-        
+
     Returns:
         MAD value
     """
     if len(series) == 0:
         return 0.0
-    
+
     median = series.median()
     return (series - median).abs().median()
 
 
-def detect_outliers_iqr(series: pd.Series, 
+def detect_outliers_iqr(series: pd.Series,
                        multiplier: float = 1.5) -> pd.Series:
     """
     Detect outliers using Interquartile Range (IQR) method.
-    
+
     Args:
         series: Numeric series
         multiplier: IQR multiplier (1.5 for outliers, 3.0 for extreme outliers)
-        
+
     Returns:
         Boolean series indicating outliers
     """
     if len(series) == 0:
         return pd.Series(dtype=bool)
-    
+
     q1 = series.quantile(0.25)
     q3 = series.quantile(0.75)
     iqr = q3 - q1
-    
+
     lower_bound = q1 - multiplier * iqr
     upper_bound = q3 + multiplier * iqr
-    
+
     return (series < lower_bound) | (series > upper_bound)
 
 
-def detect_outliers_zscore(series: pd.Series, 
+def detect_outliers_zscore(series: pd.Series,
                           threshold: float = 3.0,
                           robust: bool = False) -> pd.Series:
     """
     Detect outliers using Z-score method.
-    
+
     Args:
         series: Numeric series
         threshold: Z-score threshold (typically 2.5-3.0)
         robust: If True, use robust Z-scores (median/MAD)
-        
+
     Returns:
         Boolean series indicating outliers
     """
@@ -113,12 +112,12 @@ def calculate_rolling_stats(series: pd.Series,
                            stat: str = 'mean') -> pd.Series:
     """
     Calculate rolling statistics.
-    
+
     Args:
         series: Numeric series
         window: Rolling window size
         stat: Statistic to calculate ('mean', 'std', 'median', 'min', 'max')
-        
+
     Returns:
         Series with rolling statistics
     """
@@ -136,47 +135,47 @@ def calculate_rolling_stats(series: pd.Series,
         raise ValueError(f"Unknown statistic: {stat}")
 
 
-def calculate_pct_change(series: pd.Series, 
+def calculate_pct_change(series: pd.Series,
                         periods: int = 1,
-                        fill_method: Optional[str] = None) -> pd.Series:
+                        fill_method: str | None = None) -> pd.Series:
     """
     Calculate percentage change with optional fill method.
-    
+
     Args:
         series: Numeric series
         periods: Periods to shift for calculating change
         fill_method: Method to fill NaN values ('ffill', 'bfill', None)
-        
+
     Returns:
         Series with percentage changes
     """
     pct = series.pct_change(periods=periods)
-    
+
     if fill_method == 'ffill':
         pct = pct.ffill().bfill()
     elif fill_method == 'bfill':
         pct = pct.bfill().ffill()
-    
+
     return pct
 
 
-def winsorize(series: pd.Series, 
+def winsorize(series: pd.Series,
              lower_percentile: float = 0.05,
              upper_percentile: float = 0.95) -> pd.Series:
     """
     Winsorize series by capping extreme values at percentiles.
-    
+
     Args:
         series: Numeric series
         lower_percentile: Lower percentile to cap at
         upper_percentile: Upper percentile to cap at
-        
+
     Returns:
         Winsorized series
     """
     lower_bound = series.quantile(lower_percentile)
     upper_bound = series.quantile(upper_percentile)
-    
+
     return series.clip(lower=lower_bound, upper=upper_bound)
 
 

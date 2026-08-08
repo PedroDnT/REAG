@@ -12,8 +12,7 @@ Based on research of Banco Master/REAG fraud scheme.
 import logging
 
 import pandas as pd
-import requests
-from typing import Any, Set, Dict, List, Optional, Tuple
+from typing import Any
 from pathlib import Path
 import json
 import re
@@ -31,7 +30,7 @@ class EnhancedPhantomAssetDetector:
     - FICTITIOUS assets: Claims about assets that cannot be verified anywhere
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Path | None = None):
         """
         Args:
             cache_dir: Diretório para cache de registros oficiais
@@ -40,13 +39,13 @@ class EnhancedPhantomAssetDetector:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Registros de ativos públicos válidos
-        self.valid_stocks: Set[str] = set()
-        self.valid_etfs: Set[str] = set()
-        self.valid_bdrs: Set[str] = set()
-        self.valid_funds: Set[str] = set()
+        self.valid_stocks: set[str] = set()
+        self.valid_etfs: set[str] = set()
+        self.valid_bdrs: set[str] = set()
+        self.valid_funds: set[str] = set()
 
         # Registros de emissores conhecidos (para validação de privados)
-        self.known_issuers: Set[str] = set()
+        self.known_issuers: set[str] = set()
 
         # Patterns suspeitos (baseado em fraudes reais)
         self.suspicious_patterns = self._load_fraud_patterns()
@@ -54,7 +53,7 @@ class EnhancedPhantomAssetDetector:
         # Inicializar registros
         self._load_registries()
 
-    def _load_fraud_patterns(self) -> Dict[str, List[str]]:
+    def _load_fraud_patterns(self) -> dict[str, list[str]]:
         """
         Carrega padrões de fraude conhecidos baseados em casos reais
 
@@ -84,7 +83,7 @@ class EnhancedPhantomAssetDetector:
             ]
         }
 
-    def classify_asset_type(self, asset_code: str) -> Dict[str, Any]:
+    def classify_asset_type(self, asset_code: str) -> dict[str, Any]:
         """
         Classifica tipo de ativo e determina método de validação
 
@@ -182,7 +181,7 @@ class EnhancedPhantomAssetDetector:
             'liquidity_expectation': 'UNKNOWN'
         }
 
-    def validate_private_asset(self, asset_code: str, asset_info: Dict) -> Dict:
+    def validate_private_asset(self, asset_code: str, asset_info: dict) -> dict:
         """
         Valida ativos privados (debêntures, CRI, CRA, CDB)
 
@@ -230,7 +229,7 @@ class EnhancedPhantomAssetDetector:
             'fraud_risk': 'HIGH' if confidence in ['HIGH', 'CRITICAL'] else 'MEDIUM'
         }
 
-    def _extract_issuer(self, asset_code: str, asset_info: Dict) -> Optional[str]:
+    def _extract_issuer(self, asset_code: str, asset_info: dict) -> str | None:
         """
         Extrai nome do emissor do código ou informações do ativo
         """
@@ -246,7 +245,7 @@ class EnhancedPhantomAssetDetector:
 
         return None
 
-    def enhanced_validate_asset(self, asset_code: str, asset_info: Dict = None) -> Dict:
+    def enhanced_validate_asset(self, asset_code: str, asset_info: dict = None) -> dict:
         """
         Validação aprimorada que distingue ativos públicos vs privados
 
@@ -293,7 +292,7 @@ class EnhancedPhantomAssetDetector:
             })
 
         # Validação para ativos PRIVADOS
-        elif classification['should_be_public'] == False:
+        elif not classification['should_be_public']:
             private_validation = self.validate_private_asset(asset_code, asset_info)
 
             result.update({
@@ -383,7 +382,7 @@ class EnhancedPhantomAssetDetector:
         """Carrega registros (mantido para compatibilidade)"""
         cache_file = self.cache_dir / 'asset_registries.json'
         if cache_file.exists():
-            with open(cache_file, 'r') as f:
+            with open(cache_file) as f:
                 data = json.load(f)
                 self.valid_stocks = set(data.get('stocks', []))
                 self.valid_etfs = set(data.get('etfs', []))

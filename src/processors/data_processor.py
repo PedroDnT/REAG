@@ -2,7 +2,6 @@ import logging
 
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List
 from config.settings import Config
 from src.utils.cnpj_utils import normalize_cnpj_list, normalize_cnpj_series
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 class DataProcessor:
     """Processador de dados da CVM (leitura, limpeza, transformação)"""
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Config | None = None):
         self.config = config or Config()
 
     @staticmethod
@@ -50,9 +49,9 @@ class DataProcessor:
 
     # Translation table for Brazilian number format (created once, reused)
     _BRAZILIAN_NUMBER_TRANS = str.maketrans({'.': '', ',': '.'})
-    
+
     @staticmethod
-    def _coerce_numeric(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    def _coerce_numeric(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
         """Converte colunas numéricas tratando separadores brasileiros."""
         df = df.copy()
         for col in columns:
@@ -84,22 +83,22 @@ class DataProcessor:
         return normalize_cnpj_series(series)
 
     @classmethod
-    def _normalize_cnpj_list(cls, cnpj_list: List[str]) -> List[str]:
+    def _normalize_cnpj_list(cls, cnpj_list: list[str]) -> list[str]:
         """Normaliza lista de CNPJs para comparação consistente."""
         return normalize_cnpj_list(cnpj_list)
-    def _read_csv_generic(self, 
+    def _read_csv_generic(self,
                          file_path: Path,
                          file_type: str,
                          encoding: str = 'latin1',
                          sep: str = ';',
-                         date_cols: Optional[List[str]] = None,
-                         cnpj_cols: Optional[List[str]] = None,
-                         numeric_cols: Optional[List[str]] = None) -> pd.DataFrame:
+                         date_cols: list[str] | None = None,
+                         cnpj_cols: list[str] | None = None,
+                         numeric_cols: list[str] | None = None) -> pd.DataFrame:
         """
         Generic CSV reader with common transformations.
-        
+
         Consolidates duplicate logic from read_informe_diario, read_cda, and read_cadastro.
-        
+
         Args:
             file_path: Path to CSV file
             file_type: Type of file for logging (e.g., "Informe Diario", "CDA", "Cadastro")
@@ -108,38 +107,38 @@ class DataProcessor:
             date_cols: List of date columns to parse
             cnpj_cols: List of CNPJ columns to normalize
             numeric_cols: List of numeric columns to coerce
-            
+
         Returns:
             Processed DataFrame or empty DataFrame on error
         """
         try:
             df = pd.read_csv(file_path, encoding=encoding, sep=sep)
-            
+
             # Padronizar nomes de colunas
             df = self._normalize_columns(df)
             df = self._apply_column_aliases(df)
-            
+
             # Converter datas
             if date_cols:
                 for col in date_cols:
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
-            
+
             # Normalizar CNPJs
             if cnpj_cols:
                 for col in cnpj_cols:
                     if col in df.columns:
                         df[col] = self._normalize_cnpj_series(df[col])
-            
+
             # Converter valores numéricos
             if numeric_cols:
                 df = self._coerce_numeric(df, numeric_cols)
-            
+
             return df
         except Exception as e:
             logger.error(f"Erro ao ler {file_type} {file_path}: {e}")
             return pd.DataFrame()
-    
+
     def read_informe_diario(self, file_path: Path,
                            encoding: str = 'latin1',
                            sep: str = ';') -> pd.DataFrame:
@@ -153,7 +152,7 @@ class DataProcessor:
             cnpj_cols=['CNPJ_FUNDO'],
             numeric_cols=['VL_TOTAL', 'VL_QUOTA', 'VL_PATRIM_LIQ', 'CAPTC_DIA', 'RESG_DIA', 'NR_COTST']
         )
-    
+
     def read_cda(self, file_path: Path,
                  encoding: str = 'latin1',
                  sep: str = ';') -> pd.DataFrame:
@@ -167,7 +166,7 @@ class DataProcessor:
             cnpj_cols=['CNPJ_FUNDO'],
             numeric_cols=['VL_MERC_POS_FINAL', 'QT_POS_FINAL', 'VL_CUSTO_POS_FINAL']
         )
-    
+
     def read_cadastro(self, file_path: Path,
                      encoding: str = 'latin1',
                      sep: str = ';') -> pd.DataFrame:
@@ -191,7 +190,7 @@ class DataProcessor:
         df = self._apply_column_aliases(df)
         return df
 
-    def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+    def filter_by_cnpj(self, df: pd.DataFrame, cnpj_list: list[str]) -> pd.DataFrame:
         """Filtra DataFrame por lista de CNPJs"""
         df = self._prepare_dataframe(df)
         if 'CNPJ_FUNDO' not in df.columns:
@@ -201,7 +200,7 @@ class DataProcessor:
         normalized_series = self._normalize_cnpj_series(df['CNPJ_FUNDO'])
         return df[normalized_series.isin(normalized_list)].copy()
 
-    def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: List[str]) -> pd.DataFrame:
+    def filter_by_administrador(self, df: pd.DataFrame, admin_cnpj_list: list[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do administrador"""
         df = self._prepare_dataframe(df)
         if 'CNPJ_ADMIN' not in df.columns:
@@ -211,7 +210,7 @@ class DataProcessor:
         normalized_series = self._normalize_cnpj_series(df['CNPJ_ADMIN'])
         return df[normalized_series.isin(normalized_list)].copy()
 
-    def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: List[str]) -> pd.DataFrame:
+    def filter_by_gestor(self, df: pd.DataFrame, gestor_cnpj_list: list[str]) -> pd.DataFrame:
         """Filtra DataFrame por CNPJ do gestor"""
         df = self._prepare_dataframe(df)
         if 'CNPJ_GESTOR' not in df.columns:
@@ -241,7 +240,7 @@ class DataProcessor:
         return df
 
     def aggregate_by_fund(self, df: pd.DataFrame,
-                         agg_dict: Optional[dict] = None) -> pd.DataFrame:
+                         agg_dict: dict | None = None) -> pd.DataFrame:
         """Agrega dados por fundo"""
         if agg_dict is None:
             agg_dict = {
@@ -268,7 +267,7 @@ class DataProcessor:
         logger.info(f"Dados salvos em: {output_path}")
         return output_path
 
-    def filter_by_fund_list(self, df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+    def filter_by_fund_list(self, df: pd.DataFrame, cnpj_list: list[str]) -> pd.DataFrame:
         """
         Filter DataFrame by fund CNPJ list.
 
@@ -283,7 +282,7 @@ class DataProcessor:
         """
         return self.filter_by_cnpj(df, cnpj_list)
 
-    def get_fund_metadata(self, cadastro_df: pd.DataFrame, cnpj_list: List[str]) -> pd.DataFrame:
+    def get_fund_metadata(self, cadastro_df: pd.DataFrame, cnpj_list: list[str]) -> pd.DataFrame:
         """
         Extract fund metadata for specified CNPJs.
 
@@ -306,7 +305,7 @@ class DataProcessor:
         return filtered
 
     def merge_fund_metadata(self, df: pd.DataFrame, cadastro_df: pd.DataFrame,
-                           cols_to_merge: Optional[List[str]] = None) -> pd.DataFrame:
+                           cols_to_merge: list[str] | None = None) -> pd.DataFrame:
         """
         Enrich DataFrame with fund metadata from cadastro.
 

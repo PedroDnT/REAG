@@ -3,7 +3,7 @@ Data validation utilities.
 """
 
 import pandas as pd
-from typing import Any, List, Optional, Union
+from typing import Any
 from datetime import datetime
 
 from src.utils.cnpj_utils import is_valid_cnpj, normalize_cnpj
@@ -11,7 +11,7 @@ from src.utils.cnpj_utils import is_valid_cnpj, normalize_cnpj
 
 def validate_dataframe(
     df: pd.DataFrame,
-    required_columns: List[str],
+    required_columns: list[str],
     name: str = "DataFrame"
 ) -> None:
     """
@@ -69,9 +69,9 @@ def validate_cnpj(cnpj: Any) -> bool:
 
 
 def validate_date(
-    date_value: 'Union[str, datetime, pd.Timestamp]',
-    min_date: Optional[datetime] = None,
-    max_date: Optional[datetime] = None
+    date_value: 'str | datetime | pd.Timestamp',
+    min_date: datetime | None = None,
+    max_date: datetime | None = None
 ) -> bool:
     """
     Validate a date value.
@@ -109,8 +109,8 @@ def validate_date(
 
 def validate_numeric(
     value,
-    min_value: Optional[float] = None,
-    max_value: Optional[float] = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
     allow_negative: bool = True
 ) -> bool:
     """

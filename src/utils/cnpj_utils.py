@@ -19,7 +19,7 @@ Rejection is represented as ``None`` for scalars and ``pd.NA`` for Series, so
 bad input stays distinguishable from a real fund instead of collapsing into a
 sentinel like ``"00000000000000"``.
 """
-from typing import Any, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -32,7 +32,7 @@ CNPJ_LENGTH = 14
 _ASCII_DIGITS = frozenset("0123456789")
 
 
-def normalize_cnpj(cnpj: Any) -> Optional[str]:
+def normalize_cnpj(cnpj: Any) -> str | None:
     """
     Normalize a CNPJ to its canonical 14-digit string form.
 
@@ -91,7 +91,7 @@ def normalize_cnpj_series(series: pd.Series) -> pd.Series:
     return digits.str.zfill(CNPJ_LENGTH).where(valid, pd.NA).astype("string")
 
 
-def normalize_cnpj_list(cnpj_list: List[Any]) -> List[str]:
+def normalize_cnpj_list(cnpj_list: list[Any]) -> list[str]:
     """
     Normalize a list of CNPJs, dropping values that cannot be a CNPJ.
 

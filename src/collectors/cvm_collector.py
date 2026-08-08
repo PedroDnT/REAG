@@ -2,10 +2,9 @@ import logging
 import os
 
 import requests
-import pandas as pd
 from pathlib import Path
-from typing import Optional, List, Sequence, Tuple
-from datetime import date, datetime
+from collections.abc import Sequence
+from datetime import datetime
 from tqdm import tqdm
 import zipfile
 import time
@@ -18,9 +17,9 @@ class CVMCollector:
     """Coletor de dados da CVM (Informe Diário, CDA, Cadastro)"""
 
     #: Tipos de dado baixados por download_period quando nenhum e especificado.
-    DEFAULT_DATA_TYPES: Tuple[str, ...] = ('informe_diario', 'cda', 'cadastro')
+    DEFAULT_DATA_TYPES: tuple[str, ...] = ('informe_diario', 'cda', 'cadastro')
 
-    def __init__(self, config: Optional[Config] = None):
+    def __init__(self, config: Config | None = None):
         self.config = config or Config()
         # Uma sessao reaproveita conexoes TCP entre os muitos HEAD/GET que
         # get_available_months e download_period disparam contra o mesmo host.
@@ -51,7 +50,7 @@ class CVMCollector:
 
     def get_available_months(self, data_type: str = 'informe_diario',
                             start_year: int = 2021,
-                            end_year: int = 2026) -> List[Tuple[int, int]]:
+                            end_year: int = 2026) -> list[tuple[int, int]]:
         """
         Lista meses disponíveis na CVM para um tipo de dado
 
@@ -163,7 +162,7 @@ class CVMCollector:
         part_path.unlink(missing_ok=True)
         return False
 
-    def extract_zip(self, zip_path: Path, extract_to: Optional[Path] = None) -> Optional[Path]:
+    def extract_zip(self, zip_path: Path, extract_to: Path | None = None) -> Path | None:
         """Extrai arquivo ZIP e retorna caminho do CSV extraído"""
         try:
             if extract_to is None:
@@ -190,62 +189,62 @@ class CVMCollector:
             logger.error(f"Erro ao extrair {zip_path}: {e}")
             return None
 
-    def _download_and_extract_monthly_zip(self, 
+    def _download_and_extract_monthly_zip(self,
                                           url: str,
                                           file_prefix: str,
-                                          year: int, 
-                                          month: int) -> Optional[Path]:
+                                          year: int,
+                                          month: int) -> Path | None:
         """
         Generic method to download and extract monthly ZIP files.
-        
+
         Consolidates duplicate logic from download_informe_diario and download_cda.
-        
+
         Args:
             url: URL of the ZIP file
             file_prefix: Prefix for filenames (e.g., "inf_diario_fi", "cda_fi")
             year: Year
             month: Month
-            
+
         Returns:
             Path to extracted CSV or None on failure
         """
         csv_filename = f"{file_prefix}_{year}{month:02d}.csv"
         csv_path = self.config.RAW_DATA_DIR / csv_filename
-        
+
         # Verifica se CSV já existe
         if csv_path.exists():
             logger.info(f"Arquivo ja existe: {csv_path}")
             return csv_path
-        
+
         # Download do ZIP
         zip_filename = f"{file_prefix}_{year}{month:02d}.zip"
         zip_path = self.config.RAW_DATA_DIR / zip_filename
-        
+
         if not zip_path.exists():
             success = self.download_file(url, zip_path)
             if not success:
                 return None
-        
+
         # Extrai ZIP
         extracted_path = self.extract_zip(zip_path)
-        
+
         # Remove ZIP após extração bem-sucedida
         if extracted_path and zip_path.exists():
             zip_path.unlink()
-        
+
         return extracted_path
-    
-    def download_informe_diario(self, year: int, month: int) -> Optional[Path]:
+
+    def download_informe_diario(self, year: int, month: int) -> Path | None:
         """Baixa e extrai Informe Diário para ano/mês específico"""
         url = self.get_informe_diario_url(year, month)
         return self._download_and_extract_monthly_zip(url, "inf_diario_fi", year, month)
-    
-    def download_cda(self, year: int, month: int) -> Optional[Path]:
+
+    def download_cda(self, year: int, month: int) -> Path | None:
         """Baixa e extrai CDA para ano/mês específico"""
         url = self.get_cda_url(year, month)
         return self._download_and_extract_monthly_zip(url, "cda_fi", year, month)
 
-    def download_cadastro(self, use_current: bool = True) -> Optional[Path]:
+    def download_cadastro(self, use_current: bool = True) -> Path | None:
         """
         Baixa Cadastro de Fundos
 
@@ -281,7 +280,7 @@ class CVMCollector:
 
     def download_period(self, start_year: int, start_month: int,
                        end_year: int, end_month: int,
-                       data_types: Optional[Sequence[str]] = None,
+                       data_types: Sequence[str] | None = None,
                        check_availability: bool = True):
         """
         Baixa dados para um período completo

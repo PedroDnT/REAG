@@ -12,7 +12,7 @@ flexible enough to analyze any fund or fund group, not just REAG-specific funds.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 import pandas as pd
 
@@ -90,7 +90,7 @@ class FundSelector:
         logger.info(f"Selected {len(result)} funds for administrator '{admin_name}'")
         return result
 
-    def select_by_administrator_cnpj(self, admin_cnpjs: List[str]) -> pd.DataFrame:
+    def select_by_administrator_cnpj(self, admin_cnpjs: list[str]) -> pd.DataFrame:
         """Select funds by administrator CNPJ(s).
 
         Args:
@@ -139,7 +139,7 @@ class FundSelector:
         logger.info(f"Selected {len(result)} funds for manager '{manager_name}'")
         return result
 
-    def select_by_cnpj_list(self, cnpj_list: List[str]) -> pd.DataFrame:
+    def select_by_cnpj_list(self, cnpj_list: list[str]) -> pd.DataFrame:
         """Select funds by explicit CNPJ list.
 
         Args:
@@ -194,7 +194,7 @@ class FundSelector:
         logger.info(f"Filtered to {len(result)} active funds (from {len(df)} total)")
         return result
 
-    def get_selection_summary(self, selected_df: pd.DataFrame) -> Dict[str, Any]:
+    def get_selection_summary(self, selected_df: pd.DataFrame) -> dict[str, Any]:
         """Generate summary metadata about fund selection.
 
         Args:
@@ -279,7 +279,7 @@ def select_funds_by_manager(
 
 def select_funds_by_cnpj_list(
     cadastro_df: pd.DataFrame,
-    cnpj_list: List[str]
+    cnpj_list: list[str]
 ) -> pd.DataFrame:
     """Convenience function to select funds by CNPJ list.
 
@@ -316,7 +316,7 @@ def select_all_funds(cadastro_df: pd.DataFrame, active_only: bool = False) -> pd
 def get_fund_selection_summary(
     cadastro_df: pd.DataFrame,
     selected_funds: pd.DataFrame
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get summary statistics about fund selection.
 
     Args:

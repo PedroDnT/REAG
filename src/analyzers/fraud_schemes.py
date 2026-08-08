@@ -15,10 +15,7 @@ Sources:
 import logging
 
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Tuple
 from pathlib import Path
-from datetime import datetime, timedelta
 from config.constants import (
     ASSET_INFLATION_ILLIQUID_PCT,
     ASSET_INFLATION_MIN_RETURN_PCT,
@@ -140,14 +137,14 @@ class FraudSchemeDetector:
         # Vectorized approach: add admin columns to fund_holdings
         fund_holdings['holder_admin'] = fund_holdings['CNPJ_FUNDO'].map(fund_to_admin)
         fund_holdings['held_admin'] = fund_holdings['CD_ATIVO'].map(fund_to_admin)
-        
+
         # Filter to same admin only (much faster than checking in loop)
         same_admin = fund_holdings[
-            (fund_holdings['holder_admin'].notna()) & 
+            (fund_holdings['holder_admin'].notna()) &
             (fund_holdings['held_admin'].notna()) &
             (fund_holdings['holder_admin'] == fund_holdings['held_admin'])
         ]
-        
+
         # Use itertuples for remaining processing (10-100x faster than iterrows)
         for row in same_admin.itertuples():
             holder_fund = row.CNPJ_FUNDO
@@ -333,7 +330,7 @@ class FraudSchemeDetector:
     def generate_fraud_scheme_report(self, informe_df: pd.DataFrame,
                                      cda_df: pd.DataFrame,
                                      cadastro_df: pd.DataFrame,
-                                     output_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+                                     output_path: Path | None = None) -> dict[str, pd.DataFrame]:
         """
         Gera relatório completo de esquemas de fraude
 

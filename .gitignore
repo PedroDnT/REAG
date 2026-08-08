@@ -36,3 +36,11 @@ reports/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Coverage artifacts
+coverage.json
+coverage.xml
+htmlcov/
+
+# Ruff
+.ruff_cache/

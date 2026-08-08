@@ -9,7 +9,7 @@ Detects fraud signals from NR_COTST (number of quota holders) patterns:
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ class QuotaholderAnalyzer(BaseAnalyzer):
     def analyze(
         self,
         informe_df: pd.DataFrame,
-        cadastro_df: Optional[pd.DataFrame] = None,
+        cadastro_df: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         self.validate_dataframe(
             informe_df,
@@ -172,8 +172,12 @@ class QuotaholderAnalyzer(BaseAnalyzer):
                 if prior.empty:
                     continue
 
-                current_map = dict(zip(cotst_prev["CNPJ_FUNDO"], cotst_prev["NR_COTST"].astype(float)))
-                prior_map = dict(zip(prior["CNPJ_FUNDO"], prior["NR_COTST"].astype(float)))
+                current_map = dict(zip(
+                    cotst_prev["CNPJ_FUNDO"], cotst_prev["NR_COTST"].astype(float), strict=True
+                ))
+                prior_map = dict(zip(
+                    prior["CNPJ_FUNDO"], prior["NR_COTST"].astype(float), strict=True
+                ))
                 common = set(current_map.keys()) & set(prior_map.keys())
                 if len(common) < 3:
                     continue

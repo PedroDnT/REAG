@@ -11,7 +11,6 @@ System-wide issuer analysis across all funds:
 import logging
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from config.constants import CAPTIVE_ISSUER_MIN_FUNDS, ISSUER_NAME_SIMILARITY
@@ -150,7 +149,7 @@ class CrossFundIssuerAnalyzer(BaseAnalyzer):
             # Skip if too many issuers (O(n^2) comparison)
             return findings
 
-        issuer_list = sorted(set(str(e).strip().upper() for e in issuers if str(e).strip()))
+        issuer_list = sorted({str(e).strip().upper() for e in issuers if str(e).strip()})
         seen_pairs: set[tuple[str, str]] = set()
 
         for i in range(len(issuer_list)):

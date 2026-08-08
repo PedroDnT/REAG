@@ -9,7 +9,7 @@ Detects fraud signals from fund constitution/cancellation patterns:
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ class FundLifecycleAnalyzer(BaseAnalyzer):
     def analyze(
         self,
         cadastro_df: pd.DataFrame,
-        informe_df: Optional[pd.DataFrame] = None,
+        informe_df: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         self.validate_dataframe(
             cadastro_df, ["CNPJ_FUNDO", "DT_CONST"], name="cadastro_df"

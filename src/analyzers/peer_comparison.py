@@ -8,8 +8,6 @@ indicando possível manipulação ou fraude.
 import logging
 
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional
 from pathlib import Path
 from config.constants import (
     MIN_OBSERVATIONS,
@@ -68,8 +66,8 @@ class PeerComparisonAnalyzer:
         else:
             # If CLASSE doesn't exist, map all to 'OTHER' with proper index alignment
             mapped_categories = pd.Series('OTHER', index=cadastro_df.index)
-        
-        self.fund_categories = dict(zip(cadastro_df['CNPJ_FUNDO'], mapped_categories))
+
+        self.fund_categories = dict(zip(cadastro_df['CNPJ_FUNDO'], mapped_categories, strict=True))
 
         logger.info(f"{len(self.fund_categories):,} fundos categorizados")
 
@@ -140,7 +138,7 @@ class PeerComparisonAnalyzer:
 
         return metrics_df
 
-    def compare_with_peers(self, target_funds: List[str],
+    def compare_with_peers(self, target_funds: list[str],
                           all_metrics_df: pd.DataFrame) -> pd.DataFrame:
         """
         Compara fundos alvo com seus peers
@@ -263,7 +261,7 @@ class PeerComparisonAnalyzer:
         return (value - peer_mean) / peer_std
 
     def detect_smoothed_returns(self, informe_df: pd.DataFrame,
-                                target_funds: List[str]) -> pd.DataFrame:
+                                target_funds: list[str]) -> pd.DataFrame:
         """
         Detecta retornos "suavizados" artificialmente
 
@@ -337,9 +335,9 @@ class PeerComparisonAnalyzer:
 
         return result_df
 
-    def generate_peer_report(self, target_funds: List[str],
+    def generate_peer_report(self, target_funds: list[str],
                             informe_df: pd.DataFrame,
-                            output_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+                            output_path: Path | None = None) -> dict[str, pd.DataFrame]:
         """
         Gera relatório completo de comparação com peers
 
