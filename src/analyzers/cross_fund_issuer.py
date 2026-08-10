@@ -168,6 +168,10 @@ class CrossFundIssuerAnalyzer(BaseAnalyzer):
                             "num_admins": None,
                             "total_exposure": None,
                             "captive_admin": None,
+                            # How alike the two names are, which is the whole
+                            # finding. It was computed and thrown away, leaving
+                            # the brief with nothing but nulls to quote.
+                            "similarity": round(sim, 4),
                             "severity": "MEDIUM",
                         })
         return findings

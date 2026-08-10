@@ -418,7 +418,7 @@ SIGNAL_REGISTRY: dict[str, SignalDefinition] = {
             "Issuers appearing exclusively in one administrator's funds, near-identical issuer names, "
             "or heavy concentration in a single issuer across multiple funds can indicate manufactured assets."
         ),
-        evidence_fields=("EMISSOR", "signal_type", "num_funds", "num_admins", "total_exposure", "captive_admin", "severity"),
+        evidence_fields=("EMISSOR", "signal_type", "num_funds", "num_admins", "total_exposure", "captive_admin", "similarity", "severity"),
         primary_entities=("ADMINISTRATOR",),
         next_steps=(
             "Verify each captive issuer's corporate registry, governance structure, and economic activity.",

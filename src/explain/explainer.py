@@ -577,7 +577,12 @@ class Explainer:
                         ),
                     )
                     severity = definition.severity_rule(row)
-                    metric = f"total_exposure: {row.get('total_exposure')}, num_funds: {row.get('num_funds')}"
+                    # Only some of this analyzer's signal types have an exposure
+                    # to report; a name-similarity cluster's metric is how alike
+                    # the two names are.
+                    metric = _describe_metric(
+                        row, ("total_exposure", "similarity", "num_funds")
+                    )
                     add(
                         entity_id,
                         EvidenceItem(
