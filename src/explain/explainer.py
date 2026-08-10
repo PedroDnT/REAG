@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import numbers
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -272,8 +273,7 @@ class Explainer:
                 )
 
                 severity = definition.severity_rule(row)
-                metric_val = row.get(metric_col)
-                metric = f"{metric_col}: {metric_val}"
+                metric = _describe_metric(row, metric_col)
                 # Some findings are computed over the whole period rather than
                 # dated to a day (peer comparison, Benford, concentration), so
                 # date_col is None for those and the brief simply omits a window.
@@ -474,13 +474,18 @@ class Explainer:
                 )
 
         # --- New analyzers: fund-level signals ---
+        # Where an analyzer emits several signal types into one table, list every
+        # metric column it can populate. The first one this row filled wins.
         for key, finding_id, cnpj_col, metric_col in (
-            ("quotaholder_anomalies", "quotaholder_anomaly", "CNPJ_FUNDO", "pct_change"),
+            ("quotaholder_anomalies", "quotaholder_anomaly", "CNPJ_FUNDO",
+             ("pct_change", "per_capita_aum")),
             ("cost_basis_anomalies", "cost_basis_anomaly", "CNPJ_FUNDO", "gain_ratio"),
             ("reconciliation_gaps", "portfolio_reconciliation_gap", "CNPJ_FUNDO", "gap_pct"),
-            ("lifecycle_anomalies", "fund_lifecycle_anomaly", "CNPJ_FUNDO", "max_pl"),
+            ("lifecycle_anomalies", "fund_lifecycle_anomaly", "CNPJ_FUNDO",
+             ("max_pl", "days_active")),
             ("window_dressing", "window_dressing", "CNPJ_FUNDO", "deviation_pct"),
-            ("valuation_smoothing", "valuation_smoothing", "CNPJ_FUNDO", "autocorrelation"),
+            ("valuation_smoothing", "valuation_smoothing", "CNPJ_FUNDO",
+             ("autocorrelation", "vol_ratio", "stale_days")),
         ):
             df = results.get(key)
             if df is None or df.empty:
@@ -499,8 +504,7 @@ class Explainer:
                     Entity(entity_id=entity_id, entity_type="FUND", cnpj_digits=fund_digits, name=None, relationships=()),
                 )
                 severity = definition.severity_rule(row)
-                metric_val = row.get(metric_col)
-                metric = f"{metric_col}: {metric_val}"
+                metric = _describe_metric(row, metric_col)
                 date = row.get("DT_COMPTC")
                 add(
                     entity_id,
@@ -1049,6 +1053,48 @@ def _pick_column(columns: Iterable[str], candidates: tuple[str, ...]) -> str | N
         if c in cols:
             return c
     return None
+
+
+def _describe_metric(row: dict[str, Any], candidates: str | tuple[str, ...]) -> str:
+    """Name the metric that actually carries a value for this row.
+
+    Several analyzers write more than one signal type into one findings table,
+    each with its own metric column and nothing in the others. Naming a fixed
+    column therefore labels part of the table with a blank: on a real CVM month
+    it produced "autocorrelation: nan" on every low_volatility_ratio finding,
+    which tells the reader nothing and reads as a broken detector. Take the
+    first candidate this row actually populated instead.
+    """
+    if isinstance(candidates, str):
+        candidates = (candidates,)
+
+    for column in candidates:
+        if column not in row:
+            continue
+        value = row[column]
+        try:
+            if pd.isna(value):
+                continue
+        except (TypeError, ValueError):
+            pass  # Arrays and other non-scalars are values, not blanks.
+        return f"{column}: {_format_metric_value(value)}"
+
+    return f"{candidates[0]}: n/a"
+
+
+def _format_metric_value(value: Any) -> str:
+    """Render a metric for a human without dumping full float precision.
+
+    No thousands separators: `_metric_sort_value` splits on commas to read
+    multi-part metrics, so a grouped number would sort by its last three
+    digits.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        return str(value)
+    if isinstance(value, numbers.Integral):
+        return str(int(value))
+    number = float(value)
+    return f"{number:.2f}" if abs(number) >= 1000 else f"{number:.4g}"
 
 
 def _filter_record(row: dict[str, Any], definition: SignalDefinition | None) -> dict[str, Any]:
