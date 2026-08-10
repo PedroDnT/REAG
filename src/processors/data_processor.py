@@ -121,7 +121,22 @@ class DataProcessor:
         """
         try:
             df = pd.read_csv(
-                file_path, encoding=encoding, sep=sep, usecols=usecols, dtype=dtype
+                file_path, encoding=encoding, sep=sep, usecols=usecols, dtype=dtype,
+                # Infer each column's type from the whole file rather than chunk
+                # by chunk. Chunked inference can type one column two ways in one
+                # file -- int64 where a chunk happens to hold only digits, object
+                # where it does not -- and the halves then stringify differently
+                # ('123' vs '123.0'), which silently breaks joins on code and
+                # identifier columns.
+                #
+                # Reading a real CVM month raised DtypeWarning on four columns.
+                # Comparing both settings across every file of that month found
+                # no column whose dtype actually differed, so nothing was being
+                # corrupted in practice -- this closes the hazard and quiets a
+                # warning on every run, rather than fixing a live bug. The files
+                # are tens of MB, so reading them whole costs nothing worth
+                # having.
+                low_memory=False,
             )
 
             # Padronizar nomes de colunas
