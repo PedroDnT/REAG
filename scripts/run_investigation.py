@@ -15,12 +15,16 @@ import pandas as pd
 
 from config.settings import Config
 from src.analyzers.anomaly_detector import AnomalyDetector
+from src.analyzers.benford_law import BenfordLawAnalyzer
+from src.analyzers.concentration import ConcentrationAnalyzer
 from src.analyzers.cost_basis_analyzer import CostBasisAnalyzer
 from src.analyzers.cross_fund_issuer import CrossFundIssuerAnalyzer
 from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
 from src.analyzers.fraud_schemes import FraudSchemeDetector
 from src.analyzers.fund_lifecycle import FundLifecycleAnalyzer
 from src.analyzers.manager_network import ManagerNetworkAnalyzer
+from src.analyzers.market_data import YFINANCE_AVAILABLE, MarketDataValidator
+from src.analyzers.peer_comparison import PeerComparisonAnalyzer
 from src.analyzers.portfolio_reconciliation import PortfolioReconciliationAnalyzer
 from src.analyzers.price_divergence import CrossFundPriceDivergenceAnalyzer
 from src.analyzers.quotaholder_analyzer import QuotaholderAnalyzer
@@ -80,6 +84,10 @@ ANALYSIS_CHOICES = (
     "valuation_smoothing",
     "cross_fund_issuer",
     "price_divergence",
+    "benford",
+    "concentration",
+    "peer_comparison",
+    "market_data",
 )
 
 
@@ -200,6 +208,60 @@ def _analyzer_specs(config: Config) -> tuple[AnalyzerSpec, ...]:
                 ).analyze(_cda(d))
             },
         ),
+        AnalyzerSpec(
+            name="benford",
+            is_runnable=lambda d: _has(d.informe, "VL_PATRIM_LIQ"),
+            run=lambda d: {
+                "benford_violations": BenfordLawAnalyzer().analyze_fund_data(
+                    d.informe, cda_df=_cda(d) if _has(d.cda) else None
+                )
+            },
+        ),
+        AnalyzerSpec(
+            name="concentration",
+            is_runnable=lambda d: _has(d.cda, "CD_ATIVO", "VL_MERCADO"),
+            run=lambda d: {
+                "concentration_violations": ConcentrationAnalyzer(
+                ).detect_excessive_concentration(_cda(d))
+            },
+        ),
+        AnalyzerSpec(
+            name="peer_comparison",
+            is_runnable=lambda d: _has(d.informe, "VL_QUOTA") and _has(d.cadastro),
+            run=lambda d: {
+                "peer_outliers": _run_peer_comparison(d)
+            },
+        ),
+        AnalyzerSpec(
+            name="market_data",
+            # Optional: needs yfinance, which is not a core dependency. Skips
+            # rather than fails when it is absent, so a default install still
+            # reports a complete run.
+            is_runnable=lambda d: YFINANCE_AVAILABLE and _has(
+                d.cda, "CD_ATIVO", "VL_MERCADO", "QT_POS", "DT_COMPTC"
+            ),
+            run=lambda d: {
+                "price_manipulation": MarketDataValidator().detect_price_manipulation(
+                    MarketDataValidator().validate_portfolio_prices(
+                        _cda(d), sample_size=1000
+                    )
+                )
+            },
+        ),
+    )
+
+
+def _run_peer_comparison(loaded: LoadedData) -> pd.DataFrame:
+    """Compare each in-scope fund's risk/return profile against its peers."""
+    analyzer = PeerComparisonAnalyzer()
+    analyzer.load_fund_categories(loaded.cadastro)
+
+    metrics = analyzer.calculate_fund_metrics(loaded.informe)
+    if metrics.empty:
+        return pd.DataFrame()
+
+    return analyzer.compare_with_peers(
+        metrics["CNPJ_FUNDO"].dropna().astype(str).tolist(), metrics
     )
 
 

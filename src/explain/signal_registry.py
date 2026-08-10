@@ -470,22 +470,92 @@ SIGNAL_REGISTRY: dict[str, SignalDefinition] = {
         ),
         severity_rule=lambda row: _severity_from_named_column(row),
     ),
-    "distributor_concentration_stub": SignalDefinition(
-        finding_id="distributor_concentration_stub",
-        title="Distributor concentration (placeholder)",
+    "benford_violation": SignalDefinition(
+        finding_id="benford_violation",
+        title="Reported figures deviate from Benford's Law",
         plain_language_explanation=(
-            "This detector is reserved for internal distributor data: identifying flows dominated by a small number "
-            "of distributors or investors, which can indicate coordination or concentrated risk."
+            "Leading digits in this fund's reported figures do not follow the logarithmic distribution that "
+            "naturally-occurring financial data obeys. People inventing numbers tend to spread first digits "
+            "evenly, while genuine values start with 1 about 30% of the time and with 9 about 5%. A deviation "
+            "is a hint that some series may be constructed rather than measured."
         ),
-        evidence_fields=(),
-        primary_entities=("DISTRIBUTOR", "FUND"),
+        evidence_fields=(
+            "fund_cnpj", "pl_mad", "pl_p_value", "pl_fraud_risk", "pl_sample_size",
+            "quota_mad", "quota_fraud_risk", "captc_mad", "captc_fraud_risk",
+            "resg_mad", "resg_fraud_risk", "overall_fraud_risk",
+        ),
+        primary_entities=("FUND",),
         next_steps=(
-            "Implement once distributor order/channel datasets are wired into the pipeline.",
+            "Identify which series deviates and reconcile it against the fund's own accounting records.",
+            "Check whether the deviation coincides with a change of administrator, auditor or valuation agent.",
+            "Re-test over a longer window: short samples deviate by chance.",
         ),
         caveats=(
-            "Not computed in this phase.",
+            "Benford applies to values spanning several orders of magnitude. Series that are bounded, "
+            "capped, or heavily rounded deviate for entirely innocent reasons -- quota values clustered "
+            "near 1.0 are a common false positive.",
+            "A small sample deviates by chance; treat a low sample_size result as inconclusive.",
+            "Deviation indicates the data is unusual, not that it was fabricated.",
         ),
-        severity_rule=lambda row: "LOW",
+        severity_rule=lambda row: _severity_from_named_column(row, "overall_fraud_risk"),
+    ),
+    "concentration_violation": SignalDefinition(
+        finding_id="concentration_violation",
+        title="Portfolio concentration beyond regulatory limits",
+        plain_language_explanation=(
+            "A small number of positions account for an outsized share of this fund's portfolio, exceeding "
+            "the diversification limits its category is subject to. Concentration is not fraud in itself, "
+            "but it is how a fund becomes exposed to a single issuer's failure, and it is a precondition "
+            "for a mismarked position to move the fund's whole NAV."
+        ),
+        evidence_fields=(
+            "CNPJ_FUNDO", "category", "num_positions", "hhi", "top1_pct", "top5_pct",
+            "top10_pct", "regulatory_limit_pct", "violates_limit", "largest_position",
+            "largest_position_value", "severity", "fraud_flags",
+        ),
+        primary_entities=("FUND", "ASSET"),
+        next_steps=(
+            "Check the fund's regulation for the diversification limits it committed to.",
+            "Establish who issued the dominant position and whether they are related to the administrator or manager.",
+            "Request an independent valuation of the largest position.",
+        ),
+        caveats=(
+            "Some categories are permitted or designed to concentrate -- FIPs, single-asset and exclusive "
+            "funds among them -- so exceeding a generic limit may be entirely consistent with the mandate.",
+            "Month-end snapshots can catch a portfolio mid-rebalance.",
+        ),
+        severity_rule=lambda row: _severity_from_named_column(row),
+    ),
+    "peer_outlier": SignalDefinition(
+        finding_id="peer_outlier",
+        title="Risk/return profile far from category peers",
+        plain_language_explanation=(
+            "This fund's returns, volatility or risk-adjusted performance sit far from other funds in the "
+            "same category. Returns that are too good, or too smooth, are the signature of a portfolio "
+            "marked to something other than the market -- the pattern that makes a Ponzi structure look "
+            "attractive right up until redemptions arrive."
+        ),
+        evidence_fields=(
+            "CNPJ_FUNDO", "category", "num_peers", "fund_return", "fund_volatility",
+            "fund_sharpe", "peer_avg_return", "peer_avg_volatility", "peer_avg_sharpe",
+            "return_zscore", "volatility_zscore", "sharpe_zscore", "fraud_flag",
+        ),
+        primary_entities=("FUND",),
+        next_steps=(
+            "Compare the holdings against the peers used for comparison: an unusual profile should have an unusual portfolio behind it.",
+            "For suppressed volatility, check whether illiquid positions are being marked at model rather than market.",
+            "Ask how the fund achieved its risk-adjusted return and verify the explanation against its holdings.",
+        ),
+        caveats=(
+            "Peer groups come from the CVM category label, which is coarse -- a fund may differ legitimately "
+            "from its nominal peers because it runs a different strategy under the same label.",
+            "A genuinely skilled manager is also an outlier; this signal cannot separate skill from mismarking.",
+            "Short measurement windows make ordinary funds look extreme.",
+        ),
+        severity_rule=lambda row: _severity_from_thresholds(
+            _abs_metric(row, "sharpe_zscore"),
+            thresholds=((5.0, "CRITICAL"), (4.0, "HIGH"), (3.0, "MEDIUM")),
+        ),
     ),
 }
 

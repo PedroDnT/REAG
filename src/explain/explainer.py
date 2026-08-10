@@ -245,6 +245,16 @@ class Explainer:
             ("flow_anomalies", "flow_anomaly", "CNPJ_FUNDO", "DT_COMPTC", "Z_SCORE_FLOW"),
             ("pl_drops", "pl_drop", "CNPJ_FUNDO", "DT_COMPTC", "PL_VAR_PCT"),
             ("runs", "redemption_run", "CNPJ_FUNDO", "DT_COMPTC", "RUN_LENGTH"),
+            # Findings that previously reached a CSV but never a brief. A finding
+            # the reader never sees is only half-delivered.
+            (
+                "cross_fund_price_divergence", "cross_fund_price_divergence",
+                "CNPJ_FUNDO", "DT_COMPTC", "divergence_pct",
+            ),
+            ("concentration_spikes", "concentration_violation", "CNPJ_FUNDO", "DT_COMPTC", "PCT_CARTEIRA"),
+            ("concentration_violations", "concentration_violation", "CNPJ_FUNDO", None, "top1_pct"),
+            ("peer_outliers", "peer_outlier", "CNPJ_FUNDO", None, "sharpe_zscore"),
+            ("benford_violations", "benford_violation", "fund_cnpj", None, "pl_mad"),
         ):
             df = results.get(key)
             if df is None or df.empty:
@@ -264,7 +274,10 @@ class Explainer:
                 severity = definition.severity_rule(row)
                 metric_val = row.get(metric_col)
                 metric = f"{metric_col}: {metric_val}"
-                date = row.get(date_col)
+                # Some findings are computed over the whole period rather than
+                # dated to a day (peer comparison, Benford, concentration), so
+                # date_col is None for those and the brief simply omits a window.
+                date = row.get(date_col) if date_col else None
                 time_window = _format_time_window(date, date)
                 add(
                     entity_id,

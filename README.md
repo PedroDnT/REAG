@@ -41,18 +41,33 @@ downloads and extracts them into `data/raw/`:
 ```python
 from src.collectors.cvm_collector import CVMCollector
 
-CVMCollector().download_period(2024, 1, 2024, 12)
+c = CVMCollector()
+c.download_registro_fundo_classe()   # fund/class registry
+c.download_informe_diario(2026, 6)   # daily NAV and flows
+c.download_cda(2026, 6)              # portfolio composition
 ```
 
-CDA is available from January 2023 onward; informe diário from January 2021.
+Use `registro_fundo_classe`, not the legacy `cad_fi.csv`. Since RCVM 175 the
+informe reports by *class*, and almost every record in `cad_fi.csv` has been
+cancelled: it joins to 6.6% of the funds that actually report, against 88.9%
+for the class registry, which also carries administrator and manager CNPJs.
+
+The monthly CDA arrives as one ZIP of ten to twelve CSVs — eight position
+blocks split by asset class, plus summaries. All position blocks are read and
+unioned; pass the directory rather than a single file.
+
+**Match the registry to the period.** The registry is a current snapshot while
+the informe is historical, so pairing today's registry with an old month drops
+funds that had not yet registered. A fund filter that matches nothing is
+reported as an error rather than producing an empty report.
 
 ## Run an investigation
 
 ```bash
 python scripts/run_investigation.py \
-    --informe data/raw/inf_diario_fi_202401.csv \
-    --cda     data/raw/cda_fi_202401.csv \
-    --cadastro data/raw/cad_fi.csv \
+    --informe  data/raw/inf_diario_fi_202606.csv \
+    --cda      data/raw \
+    --cadastro data/raw/registro_classe.csv \
     --strict
 ```
 
@@ -80,8 +95,9 @@ By default every fund in the loaded data is investigated. To narrow it:
 --fund-mode cnpj_list --fund-identifier "12.345.678/0001-90,11222333000181"
 ```
 
-Names are resolved against the cadastro, so `--fund-mode administrator` and
-`--fund-mode manager` need one loaded.
+Names are resolved against the registry, so `--fund-mode administrator` and
+`--fund-mode manager` need one loaded. A full month covers every fund in Brazil,
+so scoping the first run to one administrator is usually the right move.
 
 **Use `--strict` in automation.** It exits non-zero if any analyzer crashed. A
 report with no findings because a detector died looks exactly like a clean
@@ -98,6 +114,8 @@ were skipped for lack of inputs.
 | Valuation | `valuation_smoothing`, `window_dressing`, `price_divergence`, `benford_law` |
 | Structure | `cross_fund_issuer`, `manager_network`, `fund_lifecycle`, `quotaholder_analyzer`, `peer_comparison` |
 | Market data | `market_data` — optional, requires `yfinance` |
+
+All of these are selectable with `--analysis`; `--help` lists the values.
 
 ### Two ways to detect price manipulation
 

@@ -196,3 +196,87 @@ class TestHasHelper:
         assert _has(frame, "A") is True
         assert _has(frame, "A", "B") is True
         assert _has(frame, "A", "C") is False
+
+
+class TestEveryDetectorIsReachable:
+    """A detector the CLI cannot invoke is not part of the product.
+
+    benford_law, concentration, peer_comparison and market_data were all
+    implemented and tested but absent from ANALYSIS_CHOICES, so no invocation
+    could run them -- Benford despite having its own usage guide and a place in
+    the README's detector table.
+    """
+
+    def test_every_analyzer_module_is_selectable(self):
+        from scripts.run_investigation import ANALYSIS_CHOICES
+
+        # Detector module -> the --analysis value that runs it.
+        expected = {
+            "anomaly_detector": "flow",
+            "benford_law": "benford",
+            "concentration": "concentration",
+            "cost_basis_analyzer": "cost_basis",
+            "cross_fund_issuer": "cross_fund_issuer",
+            "enhanced_phantom_assets": "phantom_assets",
+            "fraud_schemes": "schemes",
+            "fund_lifecycle": "lifecycle",
+            "manager_network": "manager_network",
+            "market_data": "market_data",
+            "peer_comparison": "peer_comparison",
+            "portfolio_reconciliation": "reconciliation",
+            "price_divergence": "price_divergence",
+            "quotaholder_analyzer": "quotaholder",
+            "valuation_smoothing": "valuation_smoothing",
+            "window_dressing": "window_dressing",
+        }
+
+        from pathlib import Path
+
+        modules = {
+            path.stem
+            for path in Path("src/analyzers").glob("*.py")
+            if path.stem not in {"__init__", "base"}
+        }
+        unreachable = {m for m in modules if expected.get(m) not in ANALYSIS_CHOICES}
+        assert not unreachable, f"analyzers with no --analysis selector: {unreachable}"
+
+    def test_market_data_skips_without_yfinance(self, monkeypatch):
+        """The optional detector must self-skip, not fail, on a default install."""
+        import scripts.run_investigation as module
+        from config.settings import Config
+
+        monkeypatch.setattr(module, "YFINANCE_AVAILABLE", False)
+        spec = next(s for s in module._analyzer_specs(Config()) if s.name == "market_data")
+
+        frame = pd.DataFrame({
+            "CD_ATIVO": ["PETR4"], "VL_MERCADO": [1.0],
+            "QT_POS": [1.0], "DT_COMPTC": [pd.Timestamp("2024-01-01")],
+        })
+        assert spec.is_runnable(module.LoadedData(cadastro=None, informe=None, cda=frame)) is False
+
+
+class TestEveryFindingReachesABrief:
+    """A finding that stops at a CSV is only half-delivered."""
+
+    def test_registry_covers_every_explained_finding(self):
+        import re
+        from pathlib import Path
+
+        from src.explain.signal_registry import SIGNAL_REGISTRY
+
+        source = Path("src/explain/explainer.py").read_text()
+        referenced = set(re.findall(r'SIGNAL_REGISTRY\[["\']([a-z_]+)["\']\]', source))
+        referenced |= set(re.findall(r'SIGNAL_REGISTRY\.get\(["\']([a-z_]+)["\']\)', source))
+
+        missing = referenced - set(SIGNAL_REGISTRY)
+        assert not missing, f"explainer references undefined signals: {missing}"
+
+    def test_no_placeholder_signals_remain(self):
+        """distributor_concentration_stub advertised a detector that never existed."""
+        from src.explain.signal_registry import SIGNAL_REGISTRY
+
+        placeholders = [
+            key for key, d in SIGNAL_REGISTRY.items()
+            if "stub" in key or "placeholder" in d.title.lower() or not d.evidence_fields
+        ]
+        assert not placeholders, f"registry advertises non-existent detectors: {placeholders}"
