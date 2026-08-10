@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from src.processors.data_processor import DataProcessor
+
 # Universe defaults, deliberately small enough that the full eval suite runs in
 # seconds while still giving each detector enough funds to form a peer group.
 DEFAULT_FUNDS = 40
@@ -133,31 +135,61 @@ def make_clean_universe(
     )
 
 
+#: Assets carrying their own code, as CVM's coded CDA blocks publish them.
+CODED_ASSETS = [f"CRI_{i:03d}" for i in range(12)] + ["PETR4", "VALE3", "ITUB4"]
+
+#: Issuers whose paper reaches the CDA with no asset code at all, as blocks 6
+#: and 8 do. Their unit prices legitimately differ between funds: one issuer
+#: floats dozens of instruments with different maturities and rates, so two
+#: funds holding "paper from bank X" are not holding the same thing.
+UNCODED_ISSUERS = [f"BANCO SINTETICO {i}" for i in range(4)]
+
+
 def _make_clean_cda(n_funds: int, dates: pd.DatetimeIndex, rng) -> pd.DataFrame:
-    """Month-end portfolio snapshots where every fund marks assets consistently."""
-    assets = [f"CRI_{i:03d}" for i in range(12)] + ["PETR4", "VALE3", "ITUB4"]
-    # One true price per asset per date; funds agree to within a fraction of 1%.
+    """Month-end portfolio snapshots where every fund marks assets consistently.
+
+    Built in the raw shape CVM publishes -- ``QT_POS_FINAL``,
+    ``VL_MERC_POS_FINAL``, and an asset code that is absent on some rows -- and
+    then run through the pipeline's own normalizer. The fixture is therefore
+    whatever the processor produces from real-shaped input, rather than a
+    hand-written guess at it, and it carries the ``CD_ATIVO_FONTE`` provenance
+    the price detector filters on.
+    """
     month_ends = sorted({d for d in dates if d.is_month_end} or {dates[-1]})
 
     rows = []
     for comptc in month_ends:
-        true_price = {a: rng.uniform(50, 500) for a in assets}
+        # One true price per coded asset per date; funds agree to within a
+        # fraction of 1%.
+        true_price = {a: rng.uniform(50, 500) for a in CODED_ASSETS}
         for i in range(n_funds):
             cnpj = fund_cnpj(i)
-            for asset in rng.choice(assets, size=5, replace=False):
-                price = true_price[asset] * (1 + rng.normal(0, 0.001))
-                quantity = float(rng.integers(1_000, 50_000))
-                rows.append({
-                    "CNPJ_FUNDO": cnpj,
-                    "CD_ATIVO": asset,
-                    "DT_COMPTC": comptc,
-                    "QT_POS": quantity,
-                    "VL_MERCADO": price * quantity,
-                    "VL_MERC_POS_FINAL": price * quantity,
-                    "EMISSOR": f"EMISSOR {asset}",
-                })
 
-    return pd.DataFrame(rows)
+            for asset in rng.choice(CODED_ASSETS, size=5, replace=False):
+                price = true_price[asset] * (1 + rng.normal(0, 0.001))
+                _append_position(rows, cnpj, comptc, price, rng,
+                                 asset=asset, issuer=f"EMISSOR {asset}")
+
+            # Uncoded paper, priced independently per fund. Comparing these
+            # across funds is the false positive the provenance filter exists to
+            # prevent, so the clean universe has to contain the temptation.
+            for issuer in rng.choice(UNCODED_ISSUERS, size=2, replace=False):
+                _append_position(rows, cnpj, comptc, rng.uniform(50, 5_000), rng,
+                                 asset=None, issuer=issuer)
+
+    return DataProcessor._normalize_cda_positions(pd.DataFrame(rows))
+
+
+def _append_position(rows, cnpj, comptc, price, rng, *, asset, issuer) -> None:
+    quantity = float(rng.integers(1_000, 50_000))
+    rows.append({
+        "CNPJ_FUNDO": cnpj,
+        "CD_ATIVO": asset if asset is not None else pd.NA,
+        "DT_COMPTC": comptc,
+        "QT_POS_FINAL": quantity,
+        "VL_MERC_POS_FINAL": price * quantity,
+        "EMISSOR": issuer,
+    })
 
 
 def _make_cadastro(n_funds: int) -> pd.DataFrame:
@@ -295,8 +327,14 @@ def inject_price_divergence(
 ) -> LabeledUniverse:
     """Mark one asset well above what every other holder declares."""
     out = _copy(universe)
+    # Only a coded instrument can be mismarked detectably: uncoded paper has no
+    # cross-fund consensus to diverge from, and the detector drops it. Injecting
+    # there would plant a label no correct detector could ever recover.
+    codeable = out.cda["CD_ATIVO_FONTE"].isin(
+        DataProcessor.INSTRUMENT_LEVEL_ASSET_SOURCES
+    )
     for cnpj in _target_funds(universe, n_funds, seed):
-        mask = out.cda["CNPJ_FUNDO"] == cnpj
+        mask = (out.cda["CNPJ_FUNDO"] == cnpj) & codeable
         if not mask.any():
             continue
         # Mismark this fund's largest position.

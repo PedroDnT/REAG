@@ -11,6 +11,3 @@ hypothesis>=6.92.0
 
 # Linting
 ruff>=0.6.0
-
-# Browser automation for scripts/playwright_workflow.py
-playwright>=1.44.0

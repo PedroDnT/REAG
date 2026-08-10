@@ -29,7 +29,7 @@ Requirements are split so you install only what you need:
 | File | Contents |
 |---|---|
 | `requirements.txt` | Core runtime: pandas, numpy, requests, matplotlib, tqdm |
-| `requirements-dev.txt` | pytest, hypothesis, ruff, playwright |
+| `requirements-dev.txt` | pytest, hypothesis, ruff |
 | `requirements-optional.txt` | `yfinance`, for the optional market-price validator |
 | `requirements-notebooks.txt` | JupyterLab, seaborn, for `notebooks/` |
 
@@ -152,6 +152,12 @@ with *labeled* injected fraud and measures each detector's precision, recall and
 — most importantly — its false-positive rate against a clean universe, checked
 against committed baselines in `evals/baseline.json`. A detector that fires on
 clean data is worse than one that fires on nothing.
+
+Synthetic fixtures have their own failure mode: model a column CVM does not
+publish and the eval will happily score a detector that can never run on real
+data. `evals/cvm_headers.json` records the real CVM headers, and
+`tests/test_eval_fixture_schema.py` drives the actual readers over them to check
+that no fixture column is invented and no scored detector is missing an input.
 
 ## Layout
 
