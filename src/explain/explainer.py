@@ -151,6 +151,19 @@ class Explainer:
         admin_col = _pick_column(df.columns, ("CNPJ_ADMIN", "CNPJ_ADMINISTRADOR"))
         gestor_col = _pick_column(df.columns, ("CNPJ_GESTOR", "CNPJ_GESTOR_GESTAO"))
 
+        def present(column: str | None) -> Any:
+            """Row value when usable, else None.
+
+            Cadastro columns arrive as nullable dtypes, so a missing value is
+            pd.NA -- and `if pd.NA` raises TypeError rather than being falsy.
+            Real CVM data has gaps in exactly these columns; synthetic fixtures
+            did not, which is why this only surfaced against a live download.
+            """
+            if not column:
+                return None
+            value = row_dict.get(column)
+            return None if value is None or pd.isna(value) else value
+
         for row in df.itertuples(index=False):
             row_dict = row._asdict()
             fund_digits = _normalize_cnpj_digits(row_dict.get("CNPJ_FUNDO"))
@@ -158,16 +171,17 @@ class Explainer:
                 continue
             entity_id = f"FUND_{fund_digits}"
             relationships = []
-            if admin_col and row_dict.get(admin_col):
-                relationships.append(f"Administrator CNPJ: {row_dict.get(admin_col)}")
-            if gestor_col and row_dict.get(gestor_col):
-                relationships.append(f"Manager CNPJ: {row_dict.get(gestor_col)}")
+            if present(admin_col):
+                relationships.append(f"Administrator CNPJ: {present(admin_col)}")
+            if present(gestor_col):
+                relationships.append(f"Manager CNPJ: {present(gestor_col)}")
 
+            name_value = present(name_col)
             catalog[entity_id] = Entity(
                 entity_id=entity_id,
                 entity_type="FUND",
                 cnpj_digits=fund_digits,
-                name=str(row_dict.get(name_col)).strip() if name_col and row_dict.get(name_col) else None,
+                name=str(name_value).strip() if name_value is not None else None,
                 relationships=tuple(relationships),
             )
 
@@ -680,7 +694,12 @@ class Explainer:
             ],
             "context": context or None,
         }
-        (output_dir / "evidence.json").write_text(json.dumps(evidence_payload, indent=2), encoding="utf-8")
+        # default=str so pandas Timestamps and NA survive serialization. Real
+        # CVM dates parse to Timestamp, which json cannot encode; the synthetic
+        # fixtures carried plain strings and so never hit this.
+        (output_dir / "evidence.json").write_text(
+            json.dumps(evidence_payload, indent=2, default=str), encoding="utf-8"
+        )
 
         markdown = self._render_markdown(entity=entity, evidence_items=evidence_items, context=context)
         html_doc = self._render_html(entity=entity, evidence_items=evidence_items, context=context, charts=charts)

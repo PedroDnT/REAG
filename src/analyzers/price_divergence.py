@@ -115,7 +115,28 @@ class CrossFundPriceDivergenceAnalyzer(BaseAnalyzer):
         if df.empty:
             return df
 
-        df["declared_unit_price"] = value.loc[usable] / quantity.loc[usable]
+        # Only compare rows identified by a specific instrument. Some CDA blocks
+        # carry no asset code and fall back to the issuer, but a bank issues
+        # dozens of CDBs with different maturities and rates -- comparing their
+        # unit prices compares different paper and manufactures divergences.
+        # Verified against real CVM data, where the issuer fallback produced
+        # "BANCO BRADESCO" as a single asset with an 858% spread.
+        if "CD_ATIVO_FONTE" in df.columns:
+            from src.processors.data_processor import DataProcessor
+
+            instrument_level = df["CD_ATIVO_FONTE"].isin(
+                DataProcessor.INSTRUMENT_LEVEL_ASSET_SOURCES
+            )
+            dropped = int((~instrument_level).sum())
+            if dropped:
+                logger.info(
+                    "Ignorando %d posicao(oes) identificadas apenas pelo emissor", dropped
+                )
+            df = df.loc[instrument_level].copy()
+            if df.empty:
+                return df
+
+        df["declared_unit_price"] = value.loc[df.index] / quantity.loc[df.index]
         return df[np.isfinite(df["declared_unit_price"])]
 
     def _divergences_within_group(

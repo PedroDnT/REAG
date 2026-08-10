@@ -333,7 +333,10 @@ class EnhancedPhantomAssetDetector:
             raise ValueError("DataFrame deve conter coluna 'CD_ATIVO'")
 
         results = []
-        unique_assets = cda_df['CD_ATIVO'].unique()
+        # Posicoes sem codigo de ativo nao sao analisaveis por ativo, e um NA
+        # aqui e pior que inutil: `cda_df['CD_ATIVO'] == NA` nao casa com nada,
+        # entao o .iloc[0] abaixo estourava IndexError.
+        unique_assets = cda_df['CD_ATIVO'].dropna().unique()
 
         logger.info(f"Analisando {len(unique_assets):,} ativos unicos...")
 

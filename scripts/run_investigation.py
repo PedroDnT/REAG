@@ -5,7 +5,7 @@ import argparse
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -88,6 +88,8 @@ class LoadedData:
     cadastro: pd.DataFrame | None
     informe: pd.DataFrame | None
     cda: pd.DataFrame | None
+    #: CNPJs the run was scoped to, after resolving --fund-mode. Empty = no filter.
+    selected_cnpjs: list[str] = field(default_factory=list)
 
 
 def _has(df: pd.DataFrame | None, *required_columns: str) -> bool:
@@ -337,6 +339,7 @@ def run_investigation(args: argparse.Namespace) -> int:
         sources=sources,
         failures=failures,
         skipped=skipped,
+        selected_cnpjs=loaded.selected_cnpjs,
     )
 
     exit_code = 1 if (failures and getattr(args, "strict", False)) else 0
@@ -463,11 +466,27 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
     cda = None
 
     if args.cadastro:
-        cadastro = processor.read_cadastro(Path(args.cadastro))
+        cadastro_path = Path(args.cadastro)
+        cadastro = (
+            processor.read_registro_fundo_classe(cadastro_path)
+            if cadastro_path.name.startswith("registro_") or cadastro_path.is_dir()
+            else processor.read_cadastro(cadastro_path)
+        )
     else:
-        maybe = _find_first(Path(args.public_data_dir), patterns=("cad_fi*.csv",))
-        if maybe:
-            cadastro = processor.read_cadastro(maybe)
+        # Prefer the RCVM 175 registry: the legacy cad_fi.csv joins to only 6.6%
+        # of the funds the informe reports on, because reporting moved to the
+        # class level and the old fund registrations were cancelled.
+        registro = Path(args.public_data_dir) / "registro_classe.csv"
+        if registro.exists():
+            cadastro = processor.read_registro_fundo_classe(registro)
+        else:
+            maybe = _find_first(Path(args.public_data_dir), patterns=("cad_fi*.csv",))
+            if maybe:
+                logger.warning(
+                    "Using legacy cad_fi.csv; it joins to a small fraction of "
+                    "current funds. Download registro_fundo_classe.zip for full coverage."
+                )
+                cadastro = processor.read_cadastro(maybe)
 
     if args.informe:
         informe = _read_informe_any(Path(args.informe), processor=processor)
@@ -506,11 +525,21 @@ def _load_data(*, args: argparse.Namespace, config: Config, processor: DataProce
         if cadastro is not None and not cadastro.empty:
             cadastro = processor.filter_by_cnpj(cadastro, selected_cnpjs)
         if informe is not None and not informe.empty:
+            before = len(informe)
             informe = processor.filter_by_cnpj(informe, selected_cnpjs)
+            if informe.empty and before:
+                # Silence here is the dangerous case: every downstream detector
+                # would report nothing, which reads exactly like "no fraud".
+                logger.error(
+                    "Fund filter matched 0 of %d informe rows. None of the %d "
+                    "selected funds reported in this period -- check that the "
+                    "registry snapshot and the informe month line up.",
+                    before, len(selected_cnpjs),
+                )
         if cda is not None and not cda.empty:
             cda = processor.filter_by_cnpj(cda, selected_cnpjs)
 
-    return LoadedData(cadastro=cadastro, informe=informe, cda=cda)
+    return LoadedData(cadastro=cadastro, informe=informe, cda=cda, selected_cnpjs=selected_cnpjs)
 
 
 def resolve_fund_scope(
@@ -605,13 +634,39 @@ def _read_informe_any(path: Path, *, processor: DataProcessor) -> pd.DataFrame:
 
 
 def _read_cda_any(path: Path, *, processor: DataProcessor) -> pd.DataFrame:
-    if path.is_dir():
-        files = sorted(path.glob("cda_fi_*.csv"))
-        if not files:
-            return pd.DataFrame()
-        dfs = [processor.read_cda(p) for p in files[:12]]  # safety cap
-        return pd.concat([df for df in dfs if not df.empty], ignore_index=True) if dfs else pd.DataFrame()
-    return processor.read_cda(path)
+    """Load CDA positions from a single CSV or a directory of monthly blocks.
+
+    CVM ships the monthly CDA as one ZIP of many CSVs. The BLC_1..BLC_8 blocks
+    hold positions split by asset class and are unioned here. Two kinds are
+    excluded because they carry no asset-level position:
+
+    - PL is a net-assets summary, one row per fund with no holdings at all.
+    - CONFID holds positions the fund is permitted to withhold temporarily. It
+      reports value but no quantity and no asset code, so its rows cannot
+      support asset-level analysis and would collapse into a single phantom
+      asset when grouped by a null CD_ATIVO.
+    """
+    if not path.is_dir():
+        return processor.read_cda(path)
+
+    files = [
+        candidate
+        for candidate in sorted(path.glob("cda_fi*.csv"))
+        if "_PL_" not in candidate.name and "_CONFID_" not in candidate.name
+    ]
+    if not files:
+        return pd.DataFrame()
+
+    frames = [processor.read_cda(candidate) for candidate in files]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+
+    combined = pd.concat(frames, ignore_index=True)
+    logger.info(
+        "Loaded %d CDA position rows from %d block(s)", len(combined), len(frames)
+    )
+    return combined
 
 
 def _find_first(base_dir: Path, *, patterns: tuple[str, ...]) -> Path | None:
@@ -627,10 +682,12 @@ def _find_first(base_dir: Path, *, patterns: tuple[str, ...]) -> Path | None:
 
 
 def _normalize_cda_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    if "VL_MERCADO" not in df.columns and "VL_MERC_POS_FINAL" in df.columns:
-        df["VL_MERCADO"] = df["VL_MERC_POS_FINAL"]
-    return df
+    """Give CDA frames the column names analyzers expect.
+
+    Delegates to DataProcessor so a CDA loaded through some other path gets the
+    same treatment as one read by read_cda, rather than the two drifting apart.
+    """
+    return DataProcessor._normalize_cda_positions(df)
 
 
 def _phantom_assets_by_fund(*, cda_df: pd.DataFrame, phantom_assets: pd.DataFrame) -> pd.DataFrame:
@@ -681,8 +738,13 @@ def _write_run_metadata(
     sources: dict[str, str],
     failures: list[str] | None = None,
     skipped: list[str] | None = None,
+    selected_cnpjs: list[str] | None = None,
 ) -> None:
-    selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
+    # Prefer the scope the load actually resolved -- otherwise a --fund-mode run
+    # reports 0 funds while having filtered to that administrator's funds. Fall
+    # back to the explicit list when the load reported none.
+    if not selected_cnpjs:
+        selected_cnpjs = _normalize_selected_cnpjs(getattr(args, "selected_cnpjs", []) or [])
     failures = failures or []
     skipped = skipped or []
     meta = {

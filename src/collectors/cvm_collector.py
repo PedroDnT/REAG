@@ -162,38 +162,47 @@ class CVMCollector:
         part_path.unlink(missing_ok=True)
         return False
 
-    def extract_zip(self, zip_path: Path, extract_to: Path | None = None) -> Path | None:
-        """Extrai arquivo ZIP e retorna caminho do CSV extraído"""
+    def extract_zip(self, zip_path: Path, extract_to: Path | None = None) -> list[Path]:
+        """Extrai todos os CSVs de um ZIP e retorna seus caminhos.
+
+        Um ZIP da CVM nao contem um CSV. O CDA mensal traz dez: oito blocos de
+        posicao (BLC_1 a BLC_8, separados por classe de ativo), um resumo de
+        patrimonio (PL) e um de fundos de investimento no exterior (fie).
+        Extrair apenas o primeiro descartava ~98% das posicoes -- inclusive
+        BLC_2 (cotas de fundos, base da deteccao de circularidade) e BLC_5/6/8
+        (credito privado, onde a marcacao discricionaria acontece).
+
+        Returns:
+            Caminhos dos CSVs extraidos, ordenados. Lista vazia em caso de erro.
+        """
         try:
             if extract_to is None:
                 extract_to = zip_path.parent
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # Lista arquivos no ZIP
-                file_list = zip_ref.namelist()
-                csv_files = [f for f in file_list if f.endswith('.csv')]
+                csv_files = sorted(f for f in zip_ref.namelist() if f.endswith('.csv'))
 
                 if not csv_files:
                     logger.warning(f"Nenhum arquivo CSV encontrado em {zip_path}")
-                    return None
+                    return []
 
-                # Extrai o CSV (assume que há apenas um CSV por ZIP)
-                csv_filename = csv_files[0]
-                zip_ref.extract(csv_filename, extract_to)
+                extracted = []
+                for csv_filename in csv_files:
+                    zip_ref.extract(csv_filename, extract_to)
+                    extracted.append(extract_to / csv_filename)
 
-                extracted_path = extract_to / csv_filename
-                logger.info(f"Extraido: {extracted_path}")
-                return extracted_path
+                logger.info(f"Extraidos {len(extracted)} CSV(s) de {zip_path.name}")
+                return extracted
 
         except Exception as e:
             logger.error(f"Erro ao extrair {zip_path}: {e}")
-            return None
+            return []
 
     def _download_and_extract_monthly_zip(self,
                                           url: str,
                                           file_prefix: str,
                                           year: int,
-                                          month: int) -> Path | None:
+                                          month: int) -> list[Path]:
         """
         Generic method to download and extract monthly ZIP files.
 
@@ -206,15 +215,14 @@ class CVMCollector:
             month: Month
 
         Returns:
-            Path to extracted CSV or None on failure
+            Caminhos dos CSVs extraidos, ou lista vazia em caso de falha
         """
-        csv_filename = f"{file_prefix}_{year}{month:02d}.csv"
-        csv_path = self.config.RAW_DATA_DIR / csv_filename
-
-        # Verifica se CSV já existe
-        if csv_path.exists():
-            logger.info(f"Arquivo ja existe: {csv_path}")
-            return csv_path
+        # O ZIP pode render varios CSVs (ver extract_zip), entao a checagem de
+        # cache olha por qualquer arquivo ja extraido daquele mes.
+        existing = sorted(self.config.RAW_DATA_DIR.glob(f"{file_prefix}*_{year}{month:02d}.csv"))
+        if existing:
+            logger.info(f"Arquivo(s) ja existe(m): {len(existing)} CSV(s) para {year}{month:02d}")
+            return existing
 
         # Download do ZIP
         zip_filename = f"{file_prefix}_{year}{month:02d}.zip"
@@ -223,26 +231,57 @@ class CVMCollector:
         if not zip_path.exists():
             success = self.download_file(url, zip_path)
             if not success:
-                return None
+                return []
 
         # Extrai ZIP
-        extracted_path = self.extract_zip(zip_path)
+        extracted = self.extract_zip(zip_path)
 
         # Remove ZIP após extração bem-sucedida
-        if extracted_path and zip_path.exists():
+        if extracted and zip_path.exists():
             zip_path.unlink()
 
-        return extracted_path
+        return extracted
 
-    def download_informe_diario(self, year: int, month: int) -> Path | None:
+    def download_informe_diario(self, year: int, month: int) -> list[Path]:
         """Baixa e extrai Informe Diário para ano/mês específico"""
         url = self.get_informe_diario_url(year, month)
         return self._download_and_extract_monthly_zip(url, "inf_diario_fi", year, month)
 
-    def download_cda(self, year: int, month: int) -> Path | None:
-        """Baixa e extrai CDA para ano/mês específico"""
+    def download_cda(self, year: int, month: int) -> list[Path]:
+        """Baixa e extrai CDA (todos os blocos) para ano/mês específico"""
         url = self.get_cda_url(year, month)
         return self._download_and_extract_monthly_zip(url, "cda_fi", year, month)
+
+    def download_registro_fundo_classe(self) -> list[Path]:
+        """Baixa o registro de fundos e classes (RCVM 175).
+
+        Desde a RCVM 175 a CVM reporta no informe diario pela *classe*
+        (CNPJ_FUNDO_CLASSE), nao pelo fundo. O cad_fi.csv legado so casa com
+        6,6% dos fundos do informe -- 46 mil dos seus 47 mil registros estao
+        CANCELADA porque migraram para a nova estrutura. Este registro casa com
+        88,9%, e traz administrador e gestor com CNPJ preenchidos em ~100% das
+        linhas.
+
+        Returns:
+            Caminhos dos CSVs extraidos (registro_fundo, registro_classe,
+            registro_subclasse), ou lista vazia em caso de falha
+        """
+        existing = sorted(self.config.RAW_DATA_DIR.glob("registro_*.csv"))
+        if existing:
+            logger.info(f"Registro ja existe: {len(existing)} CSV(s)")
+            return existing
+
+        url = f"{self.config.CVM_CADASTRO_URL}/registro_fundo_classe.zip"
+        zip_path = self.config.RAW_DATA_DIR / "registro_fundo_classe.zip"
+
+        if not zip_path.exists() and not self.download_file(url, zip_path):
+            return []
+
+        extracted = self.extract_zip(zip_path)
+        if extracted and zip_path.exists():
+            zip_path.unlink()
+
+        return extracted
 
     def download_cadastro(self, use_current: bool = True) -> Path | None:
         """
@@ -271,10 +310,10 @@ class CVMCollector:
 
         # Se for ZIP, extrair
         if success and filename.endswith('.zip'):
-            extracted_path = self.extract_zip(output_path)
-            if extracted_path and output_path.exists():
+            extracted = self.extract_zip(output_path)
+            if extracted and output_path.exists():
                 output_path.unlink()  # Remove ZIP após extração
-            return extracted_path
+            return extracted[0] if extracted else None
 
         return output_path if success else None
 

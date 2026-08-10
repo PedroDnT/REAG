@@ -43,6 +43,11 @@ def _args(tmp_path, informe_csv, **overrides):
     argv = [
         "--informe", str(informe_csv),
         "--output-dir", str(tmp_path / "out"),
+        # Point discovery at an empty directory. Without this the run picks up
+        # whatever real CVM files happen to sit in data/raw, so the test's
+        # result depends on the developer's working tree.
+        "--public-data-dir", str(tmp_path / "empty"),
+        "--processed-data-dir", str(tmp_path / "empty"),
         "--run-id", "testrun",
         "--no-explain",
     ]

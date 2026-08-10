@@ -225,9 +225,9 @@ class TestCVMCollectorExtended:
         extract_path = tmp_path / "extracted"
         result = collector.extract_zip(zip_path, extract_to=extract_path)
 
-        assert result is not None
-        assert result.exists()
-        assert result.suffix == '.csv'
+        assert len(result) == 1
+        assert result[0].exists()
+        assert result[0].suffix == '.csv'
 
     def test_extract_zip_no_csv(self, collector, tmp_path):
         """Test ZIP extraction with no CSV file."""
@@ -240,8 +240,8 @@ class TestCVMCollectorExtended:
 
         result = collector.extract_zip(zip_path)
 
-        # Should return None if no CSV found
-        assert result is None
+        # No CSV in the archive means nothing to extract
+        assert result == []
 
     def test_extract_zip_invalid_file(self, collector, tmp_path):
         """Test ZIP extraction with invalid file."""
@@ -252,7 +252,7 @@ class TestCVMCollectorExtended:
         result = collector.extract_zip(invalid_zip)
 
         # Should handle the error gracefully
-        assert result is None
+        assert result == []
 
 
 class TestPartialDownloadCleanup:
@@ -331,3 +331,51 @@ class TestDownloadPeriodDefaults:
         collector = CVMCollector()
         collector.download_period(2024, 1, 2024, 1)
         mock_cadastro.assert_called_once()
+
+
+class TestExtractsEveryCsv:
+    """A CVM ZIP is not one CSV.
+
+    The monthly CDA ships ten: eight position blocks split by asset class, a
+    net-assets summary and a foreign-fund block. Taking only the first
+    discarded ~98% of positions, including fund cotas (the basis of circularity
+    detection) and private credit (where discretionary marking happens).
+    """
+
+    @pytest.fixture
+    def collector(self, tmp_path):
+        config = Config()
+        config.RAW_DATA_DIR = tmp_path / "raw"
+        config.PROCESSED_DATA_DIR = tmp_path / "processed"
+        return CVMCollector(config=config)
+
+    def test_all_csvs_are_extracted(self, collector, tmp_path):
+        import zipfile
+
+        zip_path = tmp_path / "cda_fi_202606.zip"
+        names = [f"cda_fi_BLC_{i}_202606.csv" for i in range(1, 9)] + [
+            "cda_fi_PL_202606.csv",
+            "cda_fie_202606.csv",
+        ]
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for name in names:
+                zf.writestr(name, "A;B\n1;2\n")
+            zf.writestr("readme.txt", "ignored")
+
+        result = collector.extract_zip(zip_path, extract_to=tmp_path / "out")
+
+        assert len(result) == len(names)
+        assert {p.name for p in result} == set(names)
+        assert all(p.exists() for p in result)
+
+    def test_result_is_sorted_for_determinism(self, collector, tmp_path):
+        import zipfile
+
+        zip_path = tmp_path / "z.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for name in ["c.csv", "a.csv", "b.csv"]:
+                zf.writestr(name, "x\n1\n")
+
+        result = collector.extract_zip(zip_path, extract_to=tmp_path / "out")
+
+        assert [p.name for p in result] == ["a.csv", "b.csv", "c.csv"]
