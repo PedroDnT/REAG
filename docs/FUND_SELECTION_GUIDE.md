@@ -54,10 +54,12 @@ INVESTIGATION_NAME = "REAG"
 **Programmatic Usage:**
 ```python
 from src.utils.fund_selector import select_funds_by_administrator
+from pathlib import Path
+
 from src.processors.data_processor import DataProcessor
 
 processor = DataProcessor()
-cadastro_df = processor.read_cadastro("data/raw/cadastro/cad_fi.csv")
+cadastro_df = processor.read_registro_fundo_classe(Path("data/raw"))
 
 funds = select_funds_by_administrator(
     cadastro_df=cadastro_df,
@@ -173,11 +175,13 @@ The `FundSelector` class provides the core selection functionality:
 
 ```python
 from src.utils.fund_selector import FundSelector
+from pathlib import Path
+
 from src.processors.data_processor import DataProcessor
 
 # Load cadastro data
 processor = DataProcessor()
-cadastro_df = processor.read_cadastro("data/raw/cadastro/cad_fi.csv")
+cadastro_df = processor.read_registro_fundo_classe(Path("data/raw"))
 
 # Initialize selector
 selector = FundSelector(cadastro_df)
@@ -255,6 +259,8 @@ INCLUDE_TARGET_IN_UNIVERSE = False
 
 ```python
 from config.settings import Config
+from pathlib import Path
+
 from src.processors.data_processor import DataProcessor
 from src.utils.fund_selector import FundSelector
 
@@ -267,7 +273,7 @@ config.LEGACY_REAG_MODE = False
 
 # Load data
 processor = DataProcessor(config)
-cadastro_df = processor.read_cadastro("data/raw/cadastro/cad_fi.csv")
+cadastro_df = processor.read_registro_fundo_classe(Path("data/raw"))
 
 # Select funds
 selector = FundSelector(cadastro_df)
