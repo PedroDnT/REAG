@@ -106,7 +106,7 @@ collector.download_period(
 **Expected Output:**
 ```
 📥 Downloading: Cadastro
-✅ Downloaded: data/raw/cadastro/cad_fi.csv (15.2 MB)
+✅ Downloaded: data/raw/registro_classe.csv, registro_fundo.csv
 
 📥 Downloading: Informe Diário (2024-01)
 ✅ Downloaded: data/raw/informe/inf_diario_fi_202401.csv (45.8 MB)
@@ -166,7 +166,7 @@ detector = EnhancedPhantomAssetDetector()
 detector.update_registries()
 
 # Optional: Load valid funds from CVM cadastro
-detector.load_funds_from_cadastro(Path('data/raw/cadastro/cad_fi.csv'))
+detector.load_funds_from_cadastro(Path('data/raw/registro_classe.csv'))
 
 # Detect suspicious assets
 print("\n🔍 ENHANCED PHANTOM ASSETS DETECTION")

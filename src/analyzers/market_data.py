@@ -6,16 +6,16 @@ detectando sobrevalorização e subvalorização de ativos.
 """
 
 import logging
+import re
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional
 from pathlib import Path
 from datetime import datetime, timedelta
-import time
 
 try:
     import yfinance as yf
+    YFINANCE_AVAILABLE = True
 except Exception:  # pragma: no cover
     class _YFinanceStub:
         @staticmethod
@@ -23,8 +23,17 @@ except Exception:  # pragma: no cover
             raise ImportError("yfinance not installed")
 
     yf = _YFinanceStub()
+    YFINANCE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# B3 ticker shape: four letters then 1-2 digits (PETR4, BOVA11, ITUB3).
+#
+# CDA holdings are dominated by unlisted credit -- CRI_ABC_2024,
+# DEB_PETROBRAS_2025, cotas identified by CNPJ. Appending ".SA" to those and
+# querying Yahoo produces nothing but latency and rate-limit pressure, so
+# anything that is not shaped like a listed ticker is never sent.
+_B3_TICKER_RE = re.compile(r"^[A-Z]{4}\d{1,2}$")
 
 
 class MarketDataValidator:
@@ -37,7 +46,7 @@ class MarketDataValidator:
     3. Estimativas (quando dados não disponíveis)
     """
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Path | None = None):
         """
         Args:
             cache_dir: Diretório para cache de preços
@@ -58,8 +67,10 @@ class MarketDataValidator:
                 # Vectorized conversion: convert date column to date objects and create dict
                 df['date'] = pd.to_datetime(df['date']).dt.date
                 # Use vectorized set_index + to_dict for much faster dictionary creation
-                self.price_cache = {(ticker, date): price 
-                                   for ticker, date, price in zip(df['ticker'], df['date'], df['price'])}
+                self.price_cache = {(ticker, date): price
+                                   for ticker, date, price in zip(
+                                       df['ticker'], df['date'], df['price'], strict=True
+                                   )}
                 logger.info(f"Cache carregado: {len(self.price_cache):,} precos")
             except Exception as e:
                 logger.warning(f"Erro ao carregar cache: {e}")
@@ -78,7 +89,7 @@ class MarketDataValidator:
             df.to_csv(cache_file, index=False)
             logger.info(f"Cache salvo: {len(records):,} precos")
 
-    def get_market_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def get_market_price(self, ticker: str, date: datetime.date) -> float | None:
         """
         Busca preço de mercado para um ativo
 
@@ -105,19 +116,115 @@ class MarketDataValidator:
 
         return None
 
-    def get_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def get_price(self, ticker: str, date: datetime.date) -> float | None:
         """Backward-compatible alias for get_market_price."""
         return self.get_market_price(ticker, date)
 
-    def _convert_to_yahoo_ticker(self, ticker: str) -> str:
-        """Convert B3 ticker to Yahoo format."""
-        return ticker if ticker.endswith(".SA") else f"{ticker}.SA"
+    def _convert_to_yahoo_ticker(self, ticker: str) -> str | None:
+        """Convert a B3 ticker to Yahoo format, or None if it is not one.
 
-    def _fetch_price_yahoo(self, ticker: str, date: datetime.date) -> Optional[float]:
+        Returns None for anything that does not look like a listed B3 ticker,
+        so unlisted CDA asset codes never become HTTP requests.
+        """
+        if ticker is None:
+            return None
+
+        candidate = str(ticker).strip().upper()
+        if candidate.endswith(".SA"):
+            candidate = candidate[:-3]
+
+        if not _B3_TICKER_RE.match(candidate):
+            return None
+
+        return f"{candidate}.SA"
+
+    @staticmethod
+    def _close_series(hist: pd.DataFrame, yahoo_ticker: str) -> pd.Series | None:
+        """Extract a Close series from a yfinance frame.
+
+        Recent yfinance returns MultiIndex columns (field, ticker) even for a
+        single symbol, so a plain hist['Close'] yields a DataFrame there.
+        """
+        if hist is None or hist.empty or "Close" not in hist:
+            return None
+
+        close = hist["Close"]
+        if isinstance(close, pd.DataFrame):
+            if yahoo_ticker in close.columns:
+                close = close[yahoo_ticker]
+            elif close.shape[1] == 1:
+                close = close.iloc[:, 0]
+            else:
+                return None
+
+        close = close.dropna()
+        return close if not close.empty else None
+
+    def _fetch_prices_bulk(self, tickers, start: datetime.date, end: datetime.date) -> int:
+        """Fetch closes for many tickers in one request and fill the cache.
+
+        Replaces the per-(ticker, date) download the row loop used to perform.
+        A 10k-position CDA previously cost ~20k HTTP calls; this costs one per
+        batch of distinct tickers.
+
+        Args:
+            tickers: Iterable of raw asset codes (filtered to B3 tickers here)
+            start: First date to fetch, inclusive
+            end: Last date to fetch, inclusive
+
+        Returns:
+            Number of (ticker, date) prices added to the cache
+        """
+        yahoo_by_raw = {}
+        for raw in dict.fromkeys(tickers):
+            yahoo = self._convert_to_yahoo_ticker(raw)
+            if yahoo is not None:
+                yahoo_by_raw[raw] = yahoo
+
+        if not yahoo_by_raw:
+            logger.info("No B3-listed tickers among the requested assets; skipping fetch")
+            return 0
+
+        symbols = sorted(set(yahoo_by_raw.values()))
+        logger.info("Fetching %d ticker(s) from %s to %s", len(symbols), start, end)
+
+        try:
+            hist = yf.download(
+                symbols,
+                start=start,
+                end=end + timedelta(days=1),
+                progress=False,
+                group_by="column",
+            )
+        except ImportError:
+            logger.warning(
+                "yfinance not installed; price validation unavailable. "
+                "Install it with: pip install -r requirements-optional.txt"
+            )
+            return 0
+        except Exception as exc:
+            logger.warning("Bulk price fetch failed: %s", exc)
+            return 0
+
+        added = 0
+        for raw, yahoo in yahoo_by_raw.items():
+            close = self._close_series(hist, yahoo)
+            if close is None:
+                continue
+            for timestamp, price in close.items():
+                key = (raw, pd.Timestamp(timestamp).date())
+                if key not in self.price_cache:
+                    self.price_cache[key] = float(price)
+                    added += 1
+
+        logger.info("Cached %d price points", added)
+        return added
+
+    def _fetch_price_yahoo(self, ticker: str, date: datetime.date) -> float | None:
         """Backward-compatible alias for Yahoo fetch method."""
         return self._fetch_yahoo_price(ticker, date)
 
-    def _fetch_yahoo_price(self, ticker: str, date: datetime.date) -> Optional[float]:
+    def _fetch_yahoo_price(self, ticker: str, date: datetime.date) -> float | None:
         """
         Busca preço no Yahoo Finance
 
@@ -128,27 +235,35 @@ class MarketDataValidator:
         Returns:
             Preço de fechamento ou None
         """
+        yahoo_ticker = self._convert_to_yahoo_ticker(ticker)
+        if yahoo_ticker is None:
+            # Unlisted asset (CRI, debenture, cota): Yahoo has no such symbol.
+            logger.debug("%s is not a B3 ticker; no market price available", ticker)
+            return None
+
         try:
-            yahoo_ticker = self._convert_to_yahoo_ticker(ticker)
-
             # Buscar histórico
-            start_date = date
             end_date = date + timedelta(days=1)
-            hist = yf.download(yahoo_ticker, start=start_date, end=end_date, progress=False)
+            hist = yf.download(yahoo_ticker, start=date, end=end_date, progress=False)
 
-            if not hist.empty:
-                return float(hist['Close'].iloc[0])
+            close = self._close_series(hist, yahoo_ticker)
+            if close is not None:
+                return float(close.iloc[0])
 
             # Tentar dia anterior (caso mercado fechado)
-            start_date = date - timedelta(days=3)
-            hist = yf.download(yahoo_ticker, start=start_date, end=end_date, progress=False)
+            hist = yf.download(
+                yahoo_ticker, start=date - timedelta(days=3), end=end_date, progress=False
+            )
 
-            if not hist.empty:
-                return float(hist['Close'].iloc[-1])
+            close = self._close_series(hist, yahoo_ticker)
+            if close is not None:
+                return float(close.iloc[-1])
+        except ImportError:
+            logger.warning(
+                "yfinance not installed; price validation unavailable. "
+                "Install it with: pip install -r requirements-optional.txt"
+            )
         except Exception as e:
-            if isinstance(e, ImportError):
-                logger.warning("yfinance not installed. Run: pip install yfinance")
-                return None
             logger.debug("Could not fetch price for %s on %s: %s", ticker, date, e)
 
         return None
@@ -181,7 +296,7 @@ class MarketDataValidator:
             return validated_df.copy()
         return validated_df[validated_df['price_deviation_pct'].abs() > threshold].copy()
 
-    def generate_report(self, validated_df: pd.DataFrame) -> Dict[str, object]:
+    def generate_report(self, validated_df: pd.DataFrame) -> dict[str, object]:
         """Backward-compatible reporting API used by tests."""
         anomalies = self.detect_anomalies(validated_df)
         return {
@@ -193,7 +308,7 @@ class MarketDataValidator:
         }
 
     def validate_portfolio_prices(self, cda_df: pd.DataFrame,
-                                  sample_size: Optional[int] = None) -> pd.DataFrame:
+                                  sample_size: int | None = None) -> pd.DataFrame:
         """
         Valida preços de um portfolio
 
@@ -230,63 +345,53 @@ class MarketDataValidator:
             0
         )
 
-        # Buscar preços de mercado
         validations = []
-        total = len(cda_analysis)
 
-        logger.info(f"Buscando precos para {total:,} posicoes...")
+        # Persist whatever was fetched even if this run dies partway. Prices are
+        # expensive to obtain and rate-limited; discarding them on a crash means
+        # the next run pays for them again.
+        try:
+            # Prefetch every ticker in one request instead of one per
+            # (ticker, date) row. The row loop below only reads the cache.
+            dates = cda_analysis['DT_COMPTC'].dt.date
+            self._fetch_prices_bulk(
+                cda_analysis['CD_ATIVO'].tolist(), dates.min(), dates.max()
+            )
 
-        # Use itertuples instead of iterrows - much faster (10-100x)
-        for idx, row in enumerate(cda_analysis.itertuples(), 1):
-            ticker = row.CD_ATIVO
-            date = row.DT_COMPTC.date()
-            declared_price = row.DECLARED_PRICE
+            total = len(cda_analysis)
+            logger.info(f"Avaliando {total:,} posicoes...")
 
-            # Progress
-            if idx % 100 == 0:
-                logger.debug(f"   Progresso: {idx}/{total} ({idx/total*100:.1f}%)")
+            # Use itertuples instead of iterrows - much faster (10-100x)
+            for row in cda_analysis.itertuples():
+                ticker = row.CD_ATIVO
+                date = row.DT_COMPTC.date()
+                declared_price = row.DECLARED_PRICE
 
-            # Buscar preço de mercado
-            market_price = self.get_market_price(ticker, date)
+                market_price = self.price_cache.get((ticker, date))
 
-            if market_price is not None:
-                # Calcular divergência
-                divergence_pct = ((declared_price - market_price) / market_price * 100)
-
-                validations.append({
+                record = {
                     'CNPJ_FUNDO': getattr(row, 'CNPJ_FUNDO', None),
                     'CD_ATIVO': ticker,
                     'DT_COMPTC': date,
                     'DECLARED_PRICE': declared_price,
                     'MARKET_PRICE': market_price,
-                    'DIVERGENCE_PCT': divergence_pct,
-                    'DIVERGENCE_ABS': declared_price - market_price,
-                    'POSITION_VALUE': row.VL_MERCADO,
-                    'has_market_price': True
-                })
-
-                # Delay para evitar rate limiting
-                if idx % 50 == 0:
-                    time.sleep(0.5)
-            else:
-                validations.append({
-                    'CNPJ_FUNDO': getattr(row, 'CNPJ_FUNDO', None),
-                    'CD_ATIVO': ticker,
-                    'DT_COMPTC': date,
-                    'DECLARED_PRICE': declared_price,
-                    'MARKET_PRICE': None,
                     'DIVERGENCE_PCT': None,
                     'DIVERGENCE_ABS': None,
                     'POSITION_VALUE': row.VL_MERCADO,
-                    'has_market_price': False
-                })
+                    'has_market_price': market_price is not None,
+                }
+
+                if market_price:
+                    record['DIVERGENCE_PCT'] = (declared_price - market_price) / market_price * 100
+                    record['DIVERGENCE_ABS'] = declared_price - market_price
+
+                validations.append(record)
+        finally:
+            self._save_cache()
 
         result_df = pd.DataFrame(validations)
 
-        # Salvar cache
-        self._save_cache()
-
-        logger.info(f"Validacao concluida:")
+        logger.info("Validacao concluida:")
         logger.info(f"   Precos encontrados: {result_df['has_market_price'].sum():,}")
         logger.info(f"   Precos nao encontrados: {(~result_df['has_market_price']).sum():,}")
 
@@ -338,8 +443,8 @@ class MarketDataValidator:
         return suspicious
 
     def generate_price_report(self, cda_df: pd.DataFrame,
-                             sample_size: Optional[int] = 1000,
-                             output_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+                             sample_size: int | None = 1000,
+                             output_path: Path | None = None) -> dict[str, pd.DataFrame]:
         """
         Gera relatório completo de validação de preços
 

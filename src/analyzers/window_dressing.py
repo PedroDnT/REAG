@@ -58,11 +58,17 @@ class WindowDressingDetector(BaseAnalyzer):
 
             group = group.copy()
             group["daily_return"] = quota.pct_change()
-            group["day_of_month"] = group["DT_COMPTC"].dt.day
-            group["days_in_month"] = group["DT_COMPTC"].dt.days_in_month
-            group["is_month_end"] = (
-                group["days_in_month"] - group["day_of_month"]
-            ) <= 1
+
+            # Month end is the fund's last *reported* day in each month, not the
+            # last two calendar days. Calendar arithmetic on business-day data
+            # misses every month that ends on a weekend -- the fund reports on
+            # Friday the 29th, which is not within two days of the 31st -- and
+            # those genuine reporting-date returns then land in the mid-month
+            # baseline, both hiding the signal and inflating the yardstick it is
+            # measured against.
+            group["is_month_end"] = group.index.isin(
+                group.groupby(group["DT_COMPTC"].dt.to_period("M")).tail(1).index
+            )
 
             month_end = group[group["is_month_end"]]["daily_return"]
             mid_month = group[~group["is_month_end"]]["daily_return"]

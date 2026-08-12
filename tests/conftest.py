@@ -30,9 +30,45 @@ def anomaly_detector():
 
 
 @pytest.fixture
-def cvm_collector():
-    """CVMCollector instance with default config."""
-    return CVMCollector()
+def cvm_collector(tmp_path):
+    """CVMCollector writing into a temp directory.
+
+    CVMCollector._ensure_directories() runs at construction, so a default-config
+    instance creates data/raw and data/processed inside the working tree just by
+    existing.
+    """
+    config = Config()
+    config.RAW_DATA_DIR = tmp_path / "raw"
+    config.PROCESSED_DATA_DIR = tmp_path / "processed"
+    return CVMCollector(config=config)
+
+
+@pytest.fixture(autouse=True)
+def no_network(request, monkeypatch):
+    """Fail any unit test that reaches the network.
+
+    Detectors are meant to work offline, and a test that silently makes a real
+    request is both slow and dependent on someone else's uptime. Tests that
+    genuinely need the network opt out with @pytest.mark.integration.
+    """
+    if request.node.get_closest_marker("integration"):
+        return
+
+    def blocked(*args, **kwargs):
+        raise RuntimeError(
+            "network access from a unit test; mock the call, or mark the test "
+            "@pytest.mark.integration if it genuinely needs the network"
+        )
+
+    monkeypatch.setattr("requests.Session.request", blocked)
+    monkeypatch.setattr("requests.api.request", blocked)
+
+    try:
+        import yfinance
+    except ImportError:
+        pass
+    else:
+        monkeypatch.setattr(yfinance, "download", blocked)
 
 
 @pytest.fixture

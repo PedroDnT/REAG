@@ -3,14 +3,15 @@ Data validation utilities.
 """
 
 import pandas as pd
-import re
-from typing import Any, List, Optional
+from typing import Any
 from datetime import datetime
+
+from src.utils.cnpj_utils import is_valid_cnpj, normalize_cnpj
 
 
 def validate_dataframe(
     df: pd.DataFrame,
-    required_columns: List[str],
+    required_columns: list[str],
     name: str = "DataFrame"
 ) -> None:
     """
@@ -38,51 +39,39 @@ def validate_dataframe(
 
 def normalize_cnpj_digits(value: Any) -> str | None:
     """
-    Extract only digit characters from a CNPJ value.
+    Normalize a CNPJ value to canonical 14-digit form.
+
+    Thin delegate to :func:`src.utils.cnpj_utils.normalize_cnpj`, which is the
+    single source of truth for CNPJ handling.
 
     Args:
         value: Raw CNPJ value in any format (str, numeric, None)
 
     Returns:
-        String of digits, or None if the input is None or produces no digits
+        14-digit CNPJ string, or None if the value cannot be a CNPJ
     """
-    if value is None:
-        return None
-    digits = "".join(ch for ch in str(value) if ch.isdigit())
-    return digits if digits else None
+    return normalize_cnpj(value)
 
 
-def validate_cnpj(cnpj: str) -> bool:
+def validate_cnpj(cnpj: Any) -> bool:
     """
     Validate Brazilian CNPJ format.
 
+    Thin delegate to :func:`src.utils.cnpj_utils.is_valid_cnpj`.
+
     Args:
-        cnpj: CNPJ string to validate
+        cnpj: CNPJ value to validate
 
     Returns:
         True if valid format, False otherwise
     """
-    if not cnpj or not isinstance(cnpj, str):
-        return False
-
-    # Remove formatting
-    cnpj_clean = re.sub(r'[^\d]', '', cnpj)
-
-    # Must have 14 digits
-    if len(cnpj_clean) != 14:
-        return False
-
-    # Check if all digits are the same (invalid)
-    if cnpj_clean == cnpj_clean[0] * 14:
-        return False
-
-    return True
+    return is_valid_cnpj(cnpj)
 
 
 def validate_date(
-    date_value: 'Union[str, datetime, pd.Timestamp]',
-    min_date: Optional[datetime] = None,
-    max_date: Optional[datetime] = None
+    date_value: 'str | datetime | pd.Timestamp',
+    min_date: datetime | None = None,
+    max_date: datetime | None = None
 ) -> bool:
     """
     Validate a date value.
@@ -120,8 +109,8 @@ def validate_date(
 
 def validate_numeric(
     value,
-    min_value: Optional[float] = None,
-    max_value: Optional[float] = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
     allow_negative: bool = True
 ) -> bool:
     """

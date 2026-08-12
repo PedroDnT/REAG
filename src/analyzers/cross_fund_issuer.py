@@ -11,7 +11,6 @@ System-wide issuer analysis across all funds:
 import logging
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from config.constants import CAPTIVE_ISSUER_MIN_FUNDS, ISSUER_NAME_SIMILARITY
@@ -150,7 +149,7 @@ class CrossFundIssuerAnalyzer(BaseAnalyzer):
             # Skip if too many issuers (O(n^2) comparison)
             return findings
 
-        issuer_list = sorted(set(str(e).strip().upper() for e in issuers if str(e).strip()))
+        issuer_list = sorted({str(e).strip().upper() for e in issuers if str(e).strip()})
         seen_pairs: set[tuple[str, str]] = set()
 
         for i in range(len(issuer_list)):
@@ -169,6 +168,10 @@ class CrossFundIssuerAnalyzer(BaseAnalyzer):
                             "num_admins": None,
                             "total_exposure": None,
                             "captive_admin": None,
+                            # How alike the two names are, which is the whole
+                            # finding. It was computed and thrown away, leaving
+                            # the brief with nothing but nulls to quote.
+                            "similarity": round(sim, 4),
                             "severity": "MEDIUM",
                         })
         return findings

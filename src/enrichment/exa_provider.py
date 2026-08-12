@@ -27,7 +27,7 @@ class ExaProvider(ContextProvider):
         self.config = config
 
     @classmethod
-    def from_env(cls) -> "ExaProvider | None":
+    def from_env(cls) -> ExaProvider | None:
         api_key = os.getenv("EXA_API_KEY")
         if not api_key:
             return None

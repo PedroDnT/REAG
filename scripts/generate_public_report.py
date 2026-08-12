@@ -46,6 +46,7 @@ Benefits:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -74,7 +75,7 @@ class ReportPaths:
 @dataclass(frozen=True)
 class ReportMetadata:
     """Report metadata section.
-    
+
     Attributes:
         title: Report title string
         generation_date: ISO 8601 formatted datetime string
@@ -86,7 +87,7 @@ class ReportMetadata:
 @dataclass(frozen=True)
 class ExecutiveSummary:
     """Executive summary metrics.
-    
+
     Attributes:
         total_anomalies: Total count of all anomalies
         unique_funds_affected: Count of unique funds with anomalies
@@ -98,7 +99,7 @@ class ExecutiveSummary:
 @dataclass(frozen=True)
 class DetailedFindings:
     """Detailed anomaly counts by category.
-    
+
     Attributes:
         flow_anomalies_count: Count of flow anomalies detected
         pl_drops_count: Count of PL drop events
@@ -114,7 +115,7 @@ class DetailedFindings:
 @dataclass(frozen=True)
 class SeverityDistribution:
     """Severity breakdown of anomalies.
-    
+
     Attributes:
         high: Count of high severity anomalies (z-score > 5)
         medium: Count of medium severity anomalies (3 < z-score <= 5)
@@ -128,10 +129,10 @@ class SeverityDistribution:
 @dataclass(frozen=True)
 class AnonymizedDatasets:
     """Anonymized dataframes for each anomaly type.
-    
+
     All DataFrames must not contain CNPJ_FUNDO or DENOM_SOCIAL columns.
     Non-empty DataFrames must have FUND_ID column with pattern "FUND_XXXX".
-    
+
     Attributes:
         flow_anomalies: Anonymized flow anomaly records
         pl_drops: Anonymized PL drop records
@@ -147,10 +148,10 @@ class AnonymizedDatasets:
 @dataclass(frozen=True)
 class ReportData:
     """Complete report data structure.
-    
+
     Immutable container for all report content. Single source of truth
     for report data that can be rendered in multiple formats.
-    
+
     Attributes:
         metadata: Report metadata (title, date)
         executive_summary: High-level metrics
@@ -172,19 +173,19 @@ class ReportData:
 # Renderer Abstract Base Class and Implementations
 class ReportRenderer(ABC):
     """Abstract base class for report renderers.
-    
+
     Defines the interface contract for all format-specific renderers.
     Subclasses must implement the render method to transform ReportData
     into their target format (Markdown, HTML, JSON, etc.).
     """
-    
+
     @abstractmethod
     def render(self, data: ReportData) -> str:
         """Render report data to format-specific string.
-        
+
         Args:
             data: Complete report data structure
-            
+
         Returns:
             Formatted report string ready for output
         """
@@ -193,23 +194,23 @@ class ReportRenderer(ABC):
 
 class MarkdownRenderer(ReportRenderer):
     """Render report data as Markdown."""
-    
+
     def render(self, data: ReportData) -> str:
         """Render report to Markdown format."""
         lines: list[str] = []
-        
+
         # Header section
         lines.append(f"# {data.metadata.title}")
         lines.append("")
         lines.append(f"Generated: {data.metadata.generation_date}")
         lines.append("")
-        
+
         # Executive summary section
         lines.append("## Executive Summary")
         lines.append(f"- Total anomalies: {data.executive_summary.total_anomalies}")
         lines.append(f"- Unique funds affected: {data.executive_summary.unique_funds_affected}")
         lines.append("")
-        
+
         # Detailed findings section
         lines.append("## Detailed Findings")
         lines.append(f"- Flow anomalies: {data.detailed_findings.flow_anomalies_count}")
@@ -217,28 +218,35 @@ class MarkdownRenderer(ReportRenderer):
         lines.append(f"- Redemption runs: {data.detailed_findings.runs_count}")
         lines.append(f"- Flow/performance divergences: {data.detailed_findings.divergences_count}")
         lines.append("")
-        
+
         # Methodology section
         lines.append("## Methodology")
         lines.append(data.methodology_text)
         lines.append("")
-        
+
         # Disclaimer section
         lines.append("## Disclaimer")
         lines.append(data.disclaimer_text)
-        
+
         return "\n".join(lines) + "\n"
 
 
 class HtmlRenderer(ReportRenderer):
     """Render report data as HTML."""
-    
+
     def render(self, data: ReportData) -> str:
-        """Render report to HTML format."""
-        title = data.metadata.title
+        """Render report to HTML format.
+
+        Text fields are HTML-escaped: they originate from configuration and from
+        CSV inputs, neither of which is trusted to be markup-safe.
+        """
+        title = html.escape(str(data.metadata.title))
+        generation_date = html.escape(str(data.metadata.generation_date))
+        methodology_text = html.escape(str(data.methodology_text))
+        disclaimer_text = html.escape(str(data.disclaimer_text))
         total = data.executive_summary.total_anomalies
         funds = data.executive_summary.unique_funds_affected
-        
+
         return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -256,7 +264,7 @@ class HtmlRenderer(ReportRenderer):
   </head>
   <body>
     <h1>{title}</h1>
-    <p class="muted">Generated: {data.metadata.generation_date}</p>
+    <p class="muted">Generated: {generation_date}</p>
 
     <h2>Executive Summary</h2>
     <p class="muted">Results Obtained</p>
@@ -275,11 +283,11 @@ class HtmlRenderer(ReportRenderer):
     <h2>Methodology</h2>
     <p class="muted">Methods</p>
     <p>
-      {data.methodology_text}
+      {methodology_text}
     </p>
     <h2>Disclaimer</h2>
     <p>
-      {data.disclaimer_text}
+      {disclaimer_text}
     </p>
   </body>
 </html>
@@ -288,18 +296,18 @@ class HtmlRenderer(ReportRenderer):
 
 class JsonRenderer(ReportRenderer):
     """Render report data as JSON."""
-    
+
     def render(self, data: ReportData) -> str:
         """Render report to JSON format."""
         structure = self._build_json_structure(data)
         return json.dumps(structure, ensure_ascii=False, indent=2)
-    
+
     def _dataframe_to_records(self, df: pd.DataFrame) -> list[dict[str, Any]]:
         """Convert DataFrame to JSON-serializable records."""
         if df is None or df.empty:
             return []
         return json.loads(df.to_json(orient="records", date_format="iso"))
-    
+
     def _build_json_structure(self, data: ReportData) -> dict[str, Any]:
         """Build nested JSON structure from ReportData."""
         return {
@@ -434,10 +442,10 @@ class PublicReportGenerator:
 
     def anonymize_fund_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """Replace `CNPJ_FUNDO` with stable anonymized `FUND_ID` values.
-        
+
         Args:
             df: DataFrame potentially containing CNPJ_FUNDO column
-            
+
         Returns:
             New DataFrame with FUND_ID column, CNPJ_FUNDO removed
         """
@@ -461,14 +469,14 @@ class PublicReportGenerator:
         reports: dict[str, pd.DataFrame],
     ) -> ReportData:
         """Build unified ReportData structure from summary statistics and raw reports.
-        
+
         Args:
             summary: Dictionary containing calculated summary statistics
             reports: Dictionary mapping report names to raw DataFrames
-            
+
         Returns:
             Immutable ReportData instance with all sections populated
-            
+
         Raises:
             KeyError: If summary dictionary is missing required keys
         """
@@ -483,30 +491,30 @@ class PublicReportGenerator:
             "divergences_count",
             "severity_distribution",
         ]
-        
+
         for key in required_keys:
             if key not in summary:
                 raise KeyError(f"Summary statistics missing required key: {key}")
-        
+
         # Validate severity_distribution nested keys
         severity_dist = summary["severity_distribution"]
         for key in ["high", "medium", "low"]:
             if key not in severity_dist:
                 raise KeyError(f"Severity distribution missing required key: {key}")
-        
+
         # Extract metadata
         investigation_name = getattr(self.config, 'INVESTIGATION_NAME', 'REAG')
         metadata = ReportMetadata(
             title=f"{investigation_name} Fraud Investigation - Public Report",
             generation_date=summary["generation_date"],
         )
-        
+
         # Build executive summary
         executive_summary = ExecutiveSummary(
             total_anomalies=summary["total_anomalies"],
             unique_funds_affected=summary["unique_funds_affected"],
         )
-        
+
         # Build detailed findings
         detailed_findings = DetailedFindings(
             flow_anomalies_count=summary["flow_anomalies_count"],
@@ -514,14 +522,14 @@ class PublicReportGenerator:
             runs_count=summary["runs_count"],
             divergences_count=summary["divergences_count"],
         )
-        
+
         # Extract severity distribution
         severity = SeverityDistribution(
             high=severity_dist["high"],
             medium=severity_dist["medium"],
             low=severity_dist["low"],
         )
-        
+
         # Anonymize all datasets
         anonymized_datasets = AnonymizedDatasets(
             flow_anomalies=self.anonymize_fund_data(reports["flow_anomalies"]),
@@ -529,19 +537,19 @@ class PublicReportGenerator:
             runs=self.anonymize_fund_data(reports["runs"]),
             divergences=self.anonymize_fund_data(reports["divergences"]),
         )
-        
+
         # Define static text sections
         methodology = (
             "This report aggregates anomaly CSVs generated by the investigation "
             "pipeline and anonymizes fund identifiers before publication."
         )
-        
+
         disclaimer = (
             "This is an automated, anonymized summary intended for transparency "
             "and reproducibility. It does not constitute legal, accounting, or "
             "investment advice."
         )
-        
+
         # Assemble complete structure
         return ReportData(
             metadata=metadata,
@@ -555,18 +563,18 @@ class PublicReportGenerator:
 
     def _get_renderer(self, output_format: str) -> ReportRenderer:
         """Factory method to get format-specific renderer.
-        
+
         Args:
             output_format: Target format string (markdown, html, json)
-            
+
         Returns:
             Appropriate ReportRenderer instance
-            
+
         Raises:
             ValueError: If output_format is not supported
         """
         normalized = output_format.strip().lower()
-        
+
         if normalized in {"markdown", "md"}:
             return MarkdownRenderer()
         elif normalized in {"html", "htm"}:
@@ -578,27 +586,27 @@ class PublicReportGenerator:
 
     def generate_report(self, output_format: str, output_file: str | None = None) -> str:
         """Generate a report in the given format and optionally save it.
-        
+
         Args:
             output_format: Target format (markdown, html, json)
             output_file: Optional file path for output
-            
+
         Returns:
             Generated report content as string
-            
+
         Raises:
             ValueError: If output_format is unsupported
             IOError: If file writing fails
         """
         reports = self.load_anomaly_reports()
         summary = self.calculate_summary_statistics(reports)
-        
+
         # Build unified data structure
         report_data = self._build_report_data(summary, reports)
-        
+
         # Get appropriate renderer
         renderer = self._get_renderer(output_format)
-        
+
         # Render to target format
         content = renderer.render(report_data)
 
@@ -607,8 +615,8 @@ class PublicReportGenerator:
                 output_path = Path(output_file)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(content, encoding="utf-8")
-            except (OSError, PermissionError, IOError) as e:
-                raise IOError(f"Failed to write report to {output_file}: {e}") from e
+            except (OSError, PermissionError) as e:
+                raise OSError(f"Failed to write report to {output_file}: {e}") from e
 
         return content
 

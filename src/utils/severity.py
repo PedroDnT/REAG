@@ -4,7 +4,6 @@ Severity classification utilities for fraud detection.
 Provides consistent severity levels and classification logic across analyzers.
 """
 from enum import Enum
-from typing import Dict, Any, Optional
 
 
 class SeverityLevel(str, Enum):
@@ -29,25 +28,25 @@ SEVERITY_RANK = {
 class SeverityClassifier:
     """
     Classifies metrics into severity levels based on thresholds.
-    
+
     Provides consistent severity classification across different fraud indicators.
     """
-    
+
     @staticmethod
     def classify_by_threshold(value: float,
-                             thresholds: Dict[str, float],
+                             thresholds: dict[str, float],
                              higher_is_worse: bool = True) -> SeverityLevel:
         """
         Classify severity based on threshold ranges.
-        
+
         Args:
             value: Metric value to classify
             thresholds: Dict with keys 'critical', 'high', 'medium', 'low'
             higher_is_worse: If True, higher values = higher severity
-            
+
         Returns:
             SeverityLevel enum
-            
+
         Example:
             >>> thresholds = {'critical': 10, 'high': 5, 'medium': 2, 'low': 1}
             >>> classify_by_threshold(12, thresholds)
@@ -75,20 +74,20 @@ class SeverityClassifier:
                 return SeverityLevel.LOW
             else:
                 return SeverityLevel.INFO
-    
+
     @staticmethod
     def classify_z_score(z_score: float) -> SeverityLevel:
         """
         Classify severity based on Z-score magnitude.
-        
+
         Args:
             z_score: Z-score value (can be negative)
-            
+
         Returns:
             SeverityLevel based on absolute Z-score
         """
         abs_z = abs(z_score)
-        
+
         if abs_z >= 5.0:
             return SeverityLevel.CRITICAL
         elif abs_z >= 3.5:
@@ -99,7 +98,7 @@ class SeverityClassifier:
             return SeverityLevel.LOW
         else:
             return SeverityLevel.INFO
-    
+
     @staticmethod
     def classify_percentage_change(pct_change: float,
                                   critical: float = 50.0,
@@ -108,19 +107,19 @@ class SeverityClassifier:
                                   low: float = 5.0) -> SeverityLevel:
         """
         Classify severity based on percentage change.
-        
+
         Args:
             pct_change: Percentage change value
             critical: Threshold for critical severity
             high: Threshold for high severity
             medium: Threshold for medium severity
             low: Threshold for low severity
-            
+
         Returns:
             SeverityLevel
         """
         abs_pct = abs(pct_change)
-        
+
         if abs_pct >= critical:
             return SeverityLevel.CRITICAL
         elif abs_pct >= high:
@@ -131,17 +130,17 @@ class SeverityClassifier:
             return SeverityLevel.LOW
         else:
             return SeverityLevel.INFO
-    
+
     @staticmethod
     def classify_concentration(concentration_pct: float) -> SeverityLevel:
         """
         Classify severity based on concentration percentage.
-        
+
         High concentration = higher risk.
-        
+
         Args:
             concentration_pct: Concentration percentage (0-100)
-            
+
         Returns:
             SeverityLevel
         """
@@ -155,15 +154,15 @@ class SeverityClassifier:
             return SeverityLevel.LOW
         else:
             return SeverityLevel.INFO
-    
+
     @staticmethod
     def get_severity_color(severity: SeverityLevel) -> str:
         """
         Get color code for severity level (for visualization).
-        
+
         Args:
             severity: SeverityLevel enum
-            
+
         Returns:
             Hex color code
         """
@@ -175,15 +174,15 @@ class SeverityClassifier:
             SeverityLevel.INFO: "#6B7280",      # Gray
         }
         return colors.get(severity, "#6B7280")
-    
+
     @staticmethod
     def get_severity_emoji(severity: SeverityLevel) -> str:
         """
         Get emoji representation for severity level.
-        
+
         Args:
             severity: SeverityLevel enum
-            
+
         Returns:
             Emoji string
         """
@@ -200,17 +199,17 @@ class SeverityClassifier:
 def compare_severity(sev1: SeverityLevel, sev2: SeverityLevel) -> int:
     """
     Compare two severity levels.
-    
+
     Args:
         sev1: First severity level
         sev2: Second severity level
-        
+
     Returns:
         -1 if sev1 < sev2, 0 if equal, 1 if sev1 > sev2
     """
     rank1 = SEVERITY_RANK.get(sev1, 0)
     rank2 = SEVERITY_RANK.get(sev2, 0)
-    
+
     if rank1 < rank2:
         return -1
     elif rank1 > rank2:
@@ -222,14 +221,14 @@ def compare_severity(sev1: SeverityLevel, sev2: SeverityLevel) -> int:
 def max_severity(*severities: SeverityLevel) -> SeverityLevel:
     """
     Get the maximum (most severe) severity level from a list.
-    
+
     Args:
         *severities: Variable number of SeverityLevel values
-        
+
     Returns:
         Most severe SeverityLevel
     """
     if not severities:
         return SeverityLevel.INFO
-    
+
     return max(severities, key=lambda s: SEVERITY_RANK.get(s, 0))

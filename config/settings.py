@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional, List
 
 
 class Config:
@@ -45,10 +44,10 @@ class Config:
     TARGET_FUND_MODE: str = "legacy_reag"
 
     # Target identifier (administrator name, manager name, or None for 'all'/'fund_list' modes)
-    TARGET_IDENTIFIER: Optional[str] = None
+    TARGET_IDENTIFIER: str | None = None
 
     # Explicit list of fund CNPJs (used when TARGET_FUND_MODE = "fund_list")
-    TARGET_FUND_CNPJS: List[str] = []
+    TARGET_FUND_CNPJS: list[str] = []
 
     # Investigation name for reports and outputs (replaces "REAG" in generated content)
     INVESTIGATION_NAME: str = "REAG"
@@ -60,7 +59,7 @@ class Config:
     PEER_SELECTION_MODE: str = "all_others"
 
     # Custom peer fund CNPJs (used when PEER_SELECTION_MODE = "custom")
-    PEER_FUND_CNPJS: List[str] = []
+    PEER_FUND_CNPJS: list[str] = []
 
     # Include target funds in the comparison universe
     INCLUDE_TARGET_IN_UNIVERSE: bool = False
@@ -69,4 +68,4 @@ class Config:
     LEGACY_REAG_MODE: bool = True
 
     # REAG administrator search terms (used in legacy mode)
-    REAG_SEARCH_TERMS: List[str] = ["REAG", "CBSF", "BANCO MASTER"]
+    REAG_SEARCH_TERMS: list[str] = ["REAG", "CBSF", "BANCO MASTER"]

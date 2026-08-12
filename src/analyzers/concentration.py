@@ -8,8 +8,6 @@ e exposição a partes relacionadas.
 import logging
 
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional, Set
 from pathlib import Path
 from config.constants import (
     CONCENTRATION_LIMIT_SINGLE_ISSUER,
@@ -43,7 +41,7 @@ class ConcentrationAnalyzer:
         self.fund_categories = {}
         self.related_issuers = set()
 
-    def load_fund_categories(self, categories: Dict[str, str]):
+    def load_fund_categories(self, categories: dict[str, str]):
         """
         Carrega categorias de fundos
 
@@ -53,7 +51,7 @@ class ConcentrationAnalyzer:
         self.fund_categories = categories
         logger.info(f"{len(self.fund_categories):,} fundos categorizados")
 
-    def set_related_issuers(self, issuers: Set[str]):
+    def set_related_issuers(self, issuers: set[str]):
         """
         Define lista de emissores relacionados ao administrador
 
@@ -91,7 +89,7 @@ class ConcentrationAnalyzer:
         return hhi
 
     def analyze_fund_concentration(self, cda_df: pd.DataFrame,
-                                  fund_cnpj: str) -> Dict:
+                                  fund_cnpj: str) -> dict:
         """
         Analisa concentração de um fundo específico
 
@@ -161,7 +159,7 @@ class ConcentrationAnalyzer:
         }
 
     def detect_excessive_concentration(self, cda_df: pd.DataFrame,
-                                      target_funds: Optional[List[str]] = None) -> pd.DataFrame:
+                                      target_funds: list[str] | None = None) -> pd.DataFrame:
         """
         Detecta concentração excessiva em fundos
 
@@ -225,7 +223,7 @@ class ConcentrationAnalyzer:
         return result_df
 
     def detect_related_party_concentration(self, cda_df: pd.DataFrame,
-                                          target_funds: Optional[List[str]] = None) -> pd.DataFrame:
+                                          target_funds: list[str] | None = None) -> pd.DataFrame:
         """
         Detecta concentração em partes relacionadas
 
@@ -348,8 +346,8 @@ class ConcentrationAnalyzer:
         return result_df
 
     def generate_concentration_report(self, cda_df: pd.DataFrame,
-                                     target_funds: Optional[List[str]] = None,
-                                     output_path: Optional[Path] = None) -> Dict[str, pd.DataFrame]:
+                                     target_funds: list[str] | None = None,
+                                     output_path: Path | None = None) -> dict[str, pd.DataFrame]:
         """
         Gera relatório completo de concentração
 

@@ -1,10 +1,10 @@
 import logging
+import os
 
 import requests
-import pandas as pd
 from pathlib import Path
-from typing import Optional, List, Tuple
-from datetime import date, datetime
+from collections.abc import Sequence
+from datetime import datetime
 from tqdm import tqdm
 import zipfile
 import time
@@ -16,8 +16,14 @@ logger = logging.getLogger(__name__)
 class CVMCollector:
     """Coletor de dados da CVM (Informe Diário, CDA, Cadastro)"""
 
-    def __init__(self, config: Optional[Config] = None):
+    #: Tipos de dado baixados por download_period quando nenhum e especificado.
+    DEFAULT_DATA_TYPES: tuple[str, ...] = ('informe_diario', 'cda', 'cadastro')
+
+    def __init__(self, config: Config | None = None):
         self.config = config or Config()
+        # Uma sessao reaproveita conexoes TCP entre os muitos HEAD/GET que
+        # get_available_months e download_period disparam contra o mesmo host.
+        self._session = requests.Session()
         self._ensure_directories()
 
     def _ensure_directories(self):
@@ -36,7 +42,7 @@ class CVMCollector:
             True se arquivo existe (HTTP 200), False caso contrário
         """
         try:
-            response = requests.head(url, timeout=10, allow_redirects=True)
+            response = self._session.head(url, timeout=10, allow_redirects=True)
             return response.status_code == 200
         except Exception as e:
             logger.error(f"Erro ao verificar {url}: {e}")
@@ -44,7 +50,7 @@ class CVMCollector:
 
     def get_available_months(self, data_type: str = 'informe_diario',
                             start_year: int = 2021,
-                            end_year: int = 2026) -> List[Tuple[int, int]]:
+                            end_year: int = 2026) -> list[tuple[int, int]]:
         """
         Lista meses disponíveis na CVM para um tipo de dado
 
@@ -104,22 +110,30 @@ class CVMCollector:
         Returns:
             True se sucesso, False caso contrário
         """
+        # Baixa para um arquivo temporario e so move para o destino final apos
+        # sucesso. Caso contrario uma falha no meio do stream deixava um ZIP
+        # truncado que _download_and_extract_monthly_zip tratava como ja baixado,
+        # quebrando o download permanentemente ate limpeza manual.
+        part_path = output_path.with_name(output_path.name + '.part')
+
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, stream=True, timeout=30)
+                response = self._session.get(url, stream=True, timeout=self.config.DOWNLOAD_TIMEOUT)
                 response.raise_for_status()
 
                 total_size = int(response.headers.get('content-length', 0))
 
-                with open(output_path, 'wb') as f:
+                with open(part_path, 'wb') as f:
                     with tqdm(total=total_size, unit='B', unit_scale=True, desc=output_path.name) as pbar:
                         for chunk in response.iter_content(chunk_size=8192):
                             f.write(chunk)
                             pbar.update(len(chunk))
 
+                os.replace(part_path, output_path)
                 return True
 
             except requests.exceptions.HTTPError as e:
+                part_path.unlink(missing_ok=True)
                 # Erros 4xx (cliente) não devem ter retry
                 if 400 <= e.response.status_code < 500:
                     logger.error(f"Erro HTTP {e.response.status_code}: {url}")
@@ -136,6 +150,7 @@ class CVMCollector:
                     return False
 
             except Exception as e:
+                part_path.unlink(missing_ok=True)
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     logger.warning(f"Erro: {e}. Tentando novamente em {wait_time}s...")
@@ -144,91 +159,131 @@ class CVMCollector:
                     logger.error(f"Erro ao baixar {url}: {e}")
                     return False
 
+        part_path.unlink(missing_ok=True)
         return False
 
-    def extract_zip(self, zip_path: Path, extract_to: Optional[Path] = None) -> Optional[Path]:
-        """Extrai arquivo ZIP e retorna caminho do CSV extraído"""
+    def extract_zip(self, zip_path: Path, extract_to: Path | None = None) -> list[Path]:
+        """Extrai todos os CSVs de um ZIP e retorna seus caminhos.
+
+        Um ZIP da CVM nao contem um CSV. O CDA mensal traz dez: oito blocos de
+        posicao (BLC_1 a BLC_8, separados por classe de ativo), um resumo de
+        patrimonio (PL) e um de fundos de investimento no exterior (fie).
+        Extrair apenas o primeiro descartava ~98% das posicoes -- inclusive
+        BLC_2 (cotas de fundos, base da deteccao de circularidade) e BLC_5/6/8
+        (credito privado, onde a marcacao discricionaria acontece).
+
+        Returns:
+            Caminhos dos CSVs extraidos, ordenados. Lista vazia em caso de erro.
+        """
         try:
             if extract_to is None:
                 extract_to = zip_path.parent
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                # Lista arquivos no ZIP
-                file_list = zip_ref.namelist()
-                csv_files = [f for f in file_list if f.endswith('.csv')]
+                csv_files = sorted(f for f in zip_ref.namelist() if f.endswith('.csv'))
 
                 if not csv_files:
                     logger.warning(f"Nenhum arquivo CSV encontrado em {zip_path}")
-                    return None
+                    return []
 
-                # Extrai o CSV (assume que há apenas um CSV por ZIP)
-                csv_filename = csv_files[0]
-                zip_ref.extract(csv_filename, extract_to)
+                extracted = []
+                for csv_filename in csv_files:
+                    zip_ref.extract(csv_filename, extract_to)
+                    extracted.append(extract_to / csv_filename)
 
-                extracted_path = extract_to / csv_filename
-                logger.info(f"Extraido: {extracted_path}")
-                return extracted_path
+                logger.info(f"Extraidos {len(extracted)} CSV(s) de {zip_path.name}")
+                return extracted
 
         except Exception as e:
             logger.error(f"Erro ao extrair {zip_path}: {e}")
-            return None
+            return []
 
-    def _download_and_extract_monthly_zip(self, 
+    def _download_and_extract_monthly_zip(self,
                                           url: str,
                                           file_prefix: str,
-                                          year: int, 
-                                          month: int) -> Optional[Path]:
+                                          year: int,
+                                          month: int) -> list[Path]:
         """
         Generic method to download and extract monthly ZIP files.
-        
+
         Consolidates duplicate logic from download_informe_diario and download_cda.
-        
+
         Args:
             url: URL of the ZIP file
             file_prefix: Prefix for filenames (e.g., "inf_diario_fi", "cda_fi")
             year: Year
             month: Month
-            
+
         Returns:
-            Path to extracted CSV or None on failure
+            Caminhos dos CSVs extraidos, ou lista vazia em caso de falha
         """
-        csv_filename = f"{file_prefix}_{year}{month:02d}.csv"
-        csv_path = self.config.RAW_DATA_DIR / csv_filename
-        
-        # Verifica se CSV já existe
-        if csv_path.exists():
-            logger.info(f"Arquivo ja existe: {csv_path}")
-            return csv_path
-        
+        # O ZIP pode render varios CSVs (ver extract_zip), entao a checagem de
+        # cache olha por qualquer arquivo ja extraido daquele mes.
+        existing = sorted(self.config.RAW_DATA_DIR.glob(f"{file_prefix}*_{year}{month:02d}.csv"))
+        if existing:
+            logger.info(f"Arquivo(s) ja existe(m): {len(existing)} CSV(s) para {year}{month:02d}")
+            return existing
+
         # Download do ZIP
         zip_filename = f"{file_prefix}_{year}{month:02d}.zip"
         zip_path = self.config.RAW_DATA_DIR / zip_filename
-        
+
         if not zip_path.exists():
             success = self.download_file(url, zip_path)
             if not success:
-                return None
-        
+                return []
+
         # Extrai ZIP
-        extracted_path = self.extract_zip(zip_path)
-        
+        extracted = self.extract_zip(zip_path)
+
         # Remove ZIP após extração bem-sucedida
-        if extracted_path and zip_path.exists():
+        if extracted and zip_path.exists():
             zip_path.unlink()
-        
-        return extracted_path
-    
-    def download_informe_diario(self, year: int, month: int) -> Optional[Path]:
+
+        return extracted
+
+    def download_informe_diario(self, year: int, month: int) -> list[Path]:
         """Baixa e extrai Informe Diário para ano/mês específico"""
         url = self.get_informe_diario_url(year, month)
         return self._download_and_extract_monthly_zip(url, "inf_diario_fi", year, month)
-    
-    def download_cda(self, year: int, month: int) -> Optional[Path]:
-        """Baixa e extrai CDA para ano/mês específico"""
+
+    def download_cda(self, year: int, month: int) -> list[Path]:
+        """Baixa e extrai CDA (todos os blocos) para ano/mês específico"""
         url = self.get_cda_url(year, month)
         return self._download_and_extract_monthly_zip(url, "cda_fi", year, month)
 
-    def download_cadastro(self, use_current: bool = True) -> Optional[Path]:
+    def download_registro_fundo_classe(self) -> list[Path]:
+        """Baixa o registro de fundos e classes (RCVM 175).
+
+        Desde a RCVM 175 a CVM reporta no informe diario pela *classe*
+        (CNPJ_FUNDO_CLASSE), nao pelo fundo. O cad_fi.csv legado so casa com
+        6,6% dos fundos do informe -- 46 mil dos seus 47 mil registros estao
+        CANCELADA porque migraram para a nova estrutura. Este registro casa com
+        88,9%, e traz administrador e gestor com CNPJ preenchidos em ~100% das
+        linhas.
+
+        Returns:
+            Caminhos dos CSVs extraidos (registro_fundo, registro_classe,
+            registro_subclasse), ou lista vazia em caso de falha
+        """
+        existing = sorted(self.config.RAW_DATA_DIR.glob("registro_*.csv"))
+        if existing:
+            logger.info(f"Registro ja existe: {len(existing)} CSV(s)")
+            return existing
+
+        url = f"{self.config.CVM_CADASTRO_URL}/registro_fundo_classe.zip"
+        zip_path = self.config.RAW_DATA_DIR / "registro_fundo_classe.zip"
+
+        if not zip_path.exists() and not self.download_file(url, zip_path):
+            return []
+
+        extracted = self.extract_zip(zip_path)
+        if extracted and zip_path.exists():
+            zip_path.unlink()
+
+        return extracted
+
+    def download_cadastro(self, use_current: bool = True) -> Path | None:
         """
         Baixa Cadastro de Fundos
 
@@ -255,16 +310,16 @@ class CVMCollector:
 
         # Se for ZIP, extrair
         if success and filename.endswith('.zip'):
-            extracted_path = self.extract_zip(output_path)
-            if extracted_path and output_path.exists():
+            extracted = self.extract_zip(output_path)
+            if extracted and output_path.exists():
                 output_path.unlink()  # Remove ZIP após extração
-            return extracted_path
+            return extracted[0] if extracted else None
 
         return output_path if success else None
 
     def download_period(self, start_year: int, start_month: int,
                        end_year: int, end_month: int,
-                       data_types: List[str] = ['informe_diario', 'cda', 'cadastro'],
+                       data_types: Sequence[str] | None = None,
                        check_availability: bool = True):
         """
         Baixa dados para um período completo
@@ -272,9 +327,12 @@ class CVMCollector:
         Args:
             start_year, start_month: Período inicial
             end_year, end_month: Período final
-            data_types: Tipos de dados para baixar
+            data_types: Tipos de dados para baixar (default: DEFAULT_DATA_TYPES)
             check_availability: Se True, verifica disponibilidade antes de baixar
         """
+        if data_types is None:
+            data_types = self.DEFAULT_DATA_TYPES
+
         if start_year > end_year or (start_year == end_year and start_month > end_month):
             raise ValueError(
                 f"Start ({start_year}-{start_month:02d}) must be before "

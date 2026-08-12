@@ -16,6 +16,7 @@ from .manager_network import ManagerNetworkAnalyzer
 from .market_data import MarketDataValidator
 from .peer_comparison import PeerComparisonAnalyzer
 from .portfolio_reconciliation import PortfolioReconciliationAnalyzer
+from .price_divergence import CrossFundPriceDivergenceAnalyzer
 from .quotaholder_analyzer import QuotaholderAnalyzer
 from .valuation_smoothing import ValuationSmoothingAnalyzer
 from .window_dressing import WindowDressingDetector
@@ -26,6 +27,7 @@ __all__ = [
     "ConcentrationAnalyzer",
     "CostBasisAnalyzer",
     "CrossFundIssuerAnalyzer",
+    "CrossFundPriceDivergenceAnalyzer",
     "EnhancedPhantomAssetDetector",
     "FraudSchemeDetector",
     "FundLifecycleAnalyzer",

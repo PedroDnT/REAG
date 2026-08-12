@@ -52,8 +52,10 @@ class TestValidateCnpj:
         ("11.111.111/1111-11", False),  # All same digits after stripping
         ("00000000000000", False),  # All zeros
         ("11111111111111", False),  # All same digits
-        ("123", False),            # Too short
+        ("123", True),             # Zero-padded to 14 digits, see below
+        ("123456780001901234", False),  # Over-length: rejected, not truncated
         ("", False),               # Empty string
+        ("ABCDEFGHIJKLMN", False), # No digits
     ])
     def test_valid_cnpj_formats(self, cnpj, expected):
         assert validate_cnpj(cnpj) is expected
@@ -61,8 +63,30 @@ class TestValidateCnpj:
     def test_none_returns_false(self):
         assert validate_cnpj(None) is False
 
-    def test_non_string_returns_false(self):
-        assert validate_cnpj(12345678000190) is False
+    def test_short_cnpj_is_zero_padded_and_accepted(self):
+        """Short input is padded, because CVM exports drop leading zeros.
+
+        Validation checks structure only -- 14 digits, not a repeated-digit
+        placeholder -- and deliberately does not verify check digits, so a
+        well-formed but non-existent CNPJ passes.
+        """
+        assert validate_cnpj("123456") is True
+
+    def test_numeric_cnpj_is_accepted(self):
+        """Integers are valid input; pandas yields them when reading CVM CSVs.
+
+        The previous implementation rejected any non-str outright, disagreeing
+        with cnpj_utils.is_valid_cnpj on the same value.
+        """
+        assert validate_cnpj(12345678000190) is True
+
+    def test_agrees_with_cnpj_utils(self):
+        """The two validators must not diverge; that divergence was the bug."""
+        from src.utils.cnpj_utils import is_valid_cnpj
+
+        for value in ["12345678000190", "", "00000000000000", "123",
+                      "123456780001901234", "ABC", None, 12345678000190]:
+            assert validate_cnpj(value) is is_valid_cnpj(value), value
 
 
 # ---------------------------------------------------------------------------

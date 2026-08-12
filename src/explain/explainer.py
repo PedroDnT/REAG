@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import numbers
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
+from collections.abc import Iterable
 
 import pandas as pd
 
@@ -150,6 +152,19 @@ class Explainer:
         admin_col = _pick_column(df.columns, ("CNPJ_ADMIN", "CNPJ_ADMINISTRADOR"))
         gestor_col = _pick_column(df.columns, ("CNPJ_GESTOR", "CNPJ_GESTOR_GESTAO"))
 
+        def present(column: str | None) -> Any:
+            """Row value when usable, else None.
+
+            Cadastro columns arrive as nullable dtypes, so a missing value is
+            pd.NA -- and `if pd.NA` raises TypeError rather than being falsy.
+            Real CVM data has gaps in exactly these columns; synthetic fixtures
+            did not, which is why this only surfaced against a live download.
+            """
+            if not column:
+                return None
+            value = row_dict.get(column)
+            return None if value is None or pd.isna(value) else value
+
         for row in df.itertuples(index=False):
             row_dict = row._asdict()
             fund_digits = _normalize_cnpj_digits(row_dict.get("CNPJ_FUNDO"))
@@ -157,16 +172,17 @@ class Explainer:
                 continue
             entity_id = f"FUND_{fund_digits}"
             relationships = []
-            if admin_col and row_dict.get(admin_col):
-                relationships.append(f"Administrator CNPJ: {row_dict.get(admin_col)}")
-            if gestor_col and row_dict.get(gestor_col):
-                relationships.append(f"Manager CNPJ: {row_dict.get(gestor_col)}")
+            if present(admin_col):
+                relationships.append(f"Administrator CNPJ: {present(admin_col)}")
+            if present(gestor_col):
+                relationships.append(f"Manager CNPJ: {present(gestor_col)}")
 
+            name_value = present(name_col)
             catalog[entity_id] = Entity(
                 entity_id=entity_id,
                 entity_type="FUND",
                 cnpj_digits=fund_digits,
-                name=str(row_dict.get(name_col)).strip() if name_col and row_dict.get(name_col) else None,
+                name=str(name_value).strip() if name_value is not None else None,
                 relationships=tuple(relationships),
             )
 
@@ -230,6 +246,16 @@ class Explainer:
             ("flow_anomalies", "flow_anomaly", "CNPJ_FUNDO", "DT_COMPTC", "Z_SCORE_FLOW"),
             ("pl_drops", "pl_drop", "CNPJ_FUNDO", "DT_COMPTC", "PL_VAR_PCT"),
             ("runs", "redemption_run", "CNPJ_FUNDO", "DT_COMPTC", "RUN_LENGTH"),
+            # Findings that previously reached a CSV but never a brief. A finding
+            # the reader never sees is only half-delivered.
+            (
+                "cross_fund_price_divergence", "cross_fund_price_divergence",
+                "CNPJ_FUNDO", "DT_COMPTC", "divergence_pct",
+            ),
+            ("concentration_spikes", "concentration_violation", "CNPJ_FUNDO", "DT_COMPTC", "PCT_CARTEIRA"),
+            ("concentration_violations", "concentration_violation", "CNPJ_FUNDO", None, "top1_pct"),
+            ("peer_outliers", "peer_outlier", "CNPJ_FUNDO", None, "sharpe_zscore"),
+            ("benford_violations", "benford_violation", "fund_cnpj", None, "pl_mad"),
         ):
             df = results.get(key)
             if df is None or df.empty:
@@ -247,9 +273,11 @@ class Explainer:
                 )
 
                 severity = definition.severity_rule(row)
-                metric_val = row.get(metric_col)
-                metric = f"{metric_col}: {metric_val}"
-                date = row.get(date_col)
+                metric = _describe_metric(row, metric_col)
+                # Some findings are computed over the whole period rather than
+                # dated to a day (peer comparison, Benford, concentration), so
+                # date_col is None for those and the brief simply omits a window.
+                date = row.get(date_col) if date_col else None
                 time_window = _format_time_window(date, date)
                 add(
                     entity_id,
@@ -446,13 +474,18 @@ class Explainer:
                 )
 
         # --- New analyzers: fund-level signals ---
+        # Where an analyzer emits several signal types into one table, list every
+        # metric column it can populate. The first one this row filled wins.
         for key, finding_id, cnpj_col, metric_col in (
-            ("quotaholder_anomalies", "quotaholder_anomaly", "CNPJ_FUNDO", "pct_change"),
+            ("quotaholder_anomalies", "quotaholder_anomaly", "CNPJ_FUNDO",
+             ("pct_change", "per_capita_aum")),
             ("cost_basis_anomalies", "cost_basis_anomaly", "CNPJ_FUNDO", "gain_ratio"),
             ("reconciliation_gaps", "portfolio_reconciliation_gap", "CNPJ_FUNDO", "gap_pct"),
-            ("lifecycle_anomalies", "fund_lifecycle_anomaly", "CNPJ_FUNDO", "max_pl"),
+            ("lifecycle_anomalies", "fund_lifecycle_anomaly", "CNPJ_FUNDO",
+             ("max_pl", "days_active")),
             ("window_dressing", "window_dressing", "CNPJ_FUNDO", "deviation_pct"),
-            ("valuation_smoothing", "valuation_smoothing", "CNPJ_FUNDO", "autocorrelation"),
+            ("valuation_smoothing", "valuation_smoothing", "CNPJ_FUNDO",
+             ("autocorrelation", "vol_ratio", "stale_days")),
         ):
             df = results.get(key)
             if df is None or df.empty:
@@ -471,8 +504,7 @@ class Explainer:
                     Entity(entity_id=entity_id, entity_type="FUND", cnpj_digits=fund_digits, name=None, relationships=()),
                 )
                 severity = definition.severity_rule(row)
-                metric_val = row.get(metric_col)
-                metric = f"{metric_col}: {metric_val}"
+                metric = _describe_metric(row, metric_col)
                 date = row.get("DT_COMPTC")
                 add(
                     entity_id,
@@ -545,7 +577,12 @@ class Explainer:
                         ),
                     )
                     severity = definition.severity_rule(row)
-                    metric = f"total_exposure: {row.get('total_exposure')}, num_funds: {row.get('num_funds')}"
+                    # Only some of this analyzer's signal types have an exposure
+                    # to report; a name-similarity cluster's metric is how alike
+                    # the two names are.
+                    metric = _describe_metric(
+                        row, ("total_exposure", "similarity", "num_funds")
+                    )
                     add(
                         entity_id,
                         EvidenceItem(
@@ -679,7 +716,12 @@ class Explainer:
             ],
             "context": context or None,
         }
-        (output_dir / "evidence.json").write_text(json.dumps(evidence_payload, indent=2), encoding="utf-8")
+        # default=str so pandas Timestamps and NA survive serialization. Real
+        # CVM dates parse to Timestamp, which json cannot encode; the synthetic
+        # fixtures carried plain strings and so never hit this.
+        (output_dir / "evidence.json").write_text(
+            json.dumps(evidence_payload, indent=2, default=str), encoding="utf-8"
+        )
 
         markdown = self._render_markdown(entity=entity, evidence_items=evidence_items, context=context)
         html_doc = self._render_html(entity=entity, evidence_items=evidence_items, context=context, charts=charts)
@@ -1016,6 +1058,48 @@ def _pick_column(columns: Iterable[str], candidates: tuple[str, ...]) -> str | N
         if c in cols:
             return c
     return None
+
+
+def _describe_metric(row: dict[str, Any], candidates: str | tuple[str, ...]) -> str:
+    """Name the metric that actually carries a value for this row.
+
+    Several analyzers write more than one signal type into one findings table,
+    each with its own metric column and nothing in the others. Naming a fixed
+    column therefore labels part of the table with a blank: on a real CVM month
+    it produced "autocorrelation: nan" on every low_volatility_ratio finding,
+    which tells the reader nothing and reads as a broken detector. Take the
+    first candidate this row actually populated instead.
+    """
+    if isinstance(candidates, str):
+        candidates = (candidates,)
+
+    for column in candidates:
+        if column not in row:
+            continue
+        value = row[column]
+        try:
+            if pd.isna(value):
+                continue
+        except (TypeError, ValueError):
+            pass  # Arrays and other non-scalars are values, not blanks.
+        return f"{column}: {_format_metric_value(value)}"
+
+    return f"{candidates[0]}: n/a"
+
+
+def _format_metric_value(value: Any) -> str:
+    """Render a metric for a human without dumping full float precision.
+
+    No thousands separators: `_metric_sort_value` splits on commas to read
+    multi-part metrics, so a grouped number would sort by its last three
+    digits.
+    """
+    if isinstance(value, bool) or not isinstance(value, numbers.Number):
+        return str(value)
+    if isinstance(value, numbers.Integral):
+        return str(int(value))
+    number = float(value)
+    return f"{number:.2f}" if abs(number) >= 1000 else f"{number:.4g}"
 
 
 def _filter_record(row: dict[str, Any], definition: SignalDefinition | None) -> dict[str, Any]:

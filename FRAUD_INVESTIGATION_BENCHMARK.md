@@ -67,7 +67,7 @@ This document analyzes the current fraud investigation approaches in the REAG re
 
 ---
 
-### 2. Phantom Assets Detection (`src/analyzers/phantom_assets.py`)
+### 2. Phantom Assets Detection (basic tier, since merged into `enhanced_phantom_assets.py`)
 
 **Description:** Validates if assets exist in official registries.
 

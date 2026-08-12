@@ -71,6 +71,30 @@ class TestCrossFundIssuer:
         similar = result[result["signal_type"] == "name_similarity_cluster"]
         assert len(similar) >= 1
 
+    def test_name_similarity_reports_how_alike_the_names_are(self, analyzer):
+        """The score was computed and discarded, so the brief quoted only nulls.
+
+        Every other column on this signal type is null by construction -- there
+        is no exposure or fund count to report for a pair of names -- which left
+        38 lines of a real run's briefs reading "total_exposure: nan".
+        """
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["fund1", "fund2"],
+            "CD_ATIVO": ["a1", "a2"],
+            "VL_MERCADO": [100_000, 100_000],
+            "EMISSOR": ["EMPRESA ABC LTDA", "EMPRESA ABD LTDA"],
+        })
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["fund1", "fund2"],
+            "CNPJ_ADMIN": ["admin1", "admin1"],
+        })
+        similar = analyzer.analyze(cda, cadastro).query(
+            "signal_type == 'name_similarity_cluster'"
+        )
+        assert similar["similarity"].notna().all()
+        assert (similar["similarity"] < 1.0).all(), "identical names are not a cluster"
+        assert (similar["similarity"] >= 0.85).all()
+
     def test_no_signals_for_diverse_issuers(self, analyzer):
         cda = pd.DataFrame({
             "CNPJ_FUNDO": ["fund1", "fund2"],

@@ -10,7 +10,6 @@ Cross-validates CDA portfolio composition against Informe Diario PL:
 import logging
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from config.constants import RECON_GAP_WARNING, RECON_GAP_CRITICAL

@@ -8,7 +8,7 @@ import logging
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 import pandas as pd
 from datetime import datetime
 
@@ -26,7 +26,7 @@ class BaseAnalyzer(ABC):
     - Logging
     """
 
-    def __init__(self, config: Optional[Any] = None):
+    def __init__(self, config: Any | None = None):
         """
         Initialize the analyzer.
 
@@ -51,9 +51,9 @@ class BaseAnalyzer(ABC):
     def generate_report(
         self,
         results: pd.DataFrame,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         format: str = 'csv'
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """
         Generate and save analysis report.
 
@@ -87,7 +87,7 @@ class BaseAnalyzer(ABC):
     def validate_dataframe(
         self,
         df: pd.DataFrame,
-        required_columns: List[str],
+        required_columns: list[str],
         name: str = "DataFrame"
     ) -> None:
         """
@@ -126,7 +126,7 @@ class BaseAnalyzer(ABC):
         log_func = level_map.get(level, logger.info)
         log_func(message)
 
-    def create_summary_stats(self, df: pd.DataFrame, group_by: Optional[str] = None) -> Dict[str, Any]:
+    def create_summary_stats(self, df: pd.DataFrame, group_by: str | None = None) -> dict[str, Any]:
         """
         Create summary statistics for results.
 

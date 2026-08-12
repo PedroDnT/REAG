@@ -6,15 +6,17 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config.settings import Config
-from scripts.run_investigation import build_parser, run_investigation, sanitize_run_id
-from src.processors.data_processor import DataProcessor
+# Imports follow the sys.path insertion above so this stays runnable as a
+# standalone script (`python scripts/investigation_tui.py`).
+from config.settings import Config  # noqa: E402
+from scripts.run_investigation import build_parser, run_investigation, sanitize_run_id  # noqa: E402
+from src.processors.data_processor import DataProcessor  # noqa: E402
 
 InputFn = Callable[[str], str]
 PrintFn = Callable[[str], None]

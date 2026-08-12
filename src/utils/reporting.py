@@ -4,7 +4,7 @@ Report generation utilities.
 
 import pandas as pd
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 from datetime import datetime
 
 
@@ -59,7 +59,7 @@ class ReportGenerator:
 
     def create_summary_report(
         self,
-        results: Dict[str, pd.DataFrame],
+        results: dict[str, pd.DataFrame],
         title: str = "Analysis Summary",
         output_filename: str = "summary_report.txt"
     ) -> Path:
@@ -116,7 +116,7 @@ class ReportGenerator:
 
     def create_markdown_report(
         self,
-        sections: List[Dict[str, Any]],
+        sections: list[dict[str, Any]],
         title: str = "Analysis Report",
         output_filename: str = "report.md"
     ) -> Path:
@@ -162,9 +162,9 @@ class ReportGenerator:
 
     def create_executive_summary(
         self,
-        metrics: Dict[str, Any],
-        highlights: List[str],
-        recommendations: List[str],
+        metrics: dict[str, Any],
+        highlights: list[str],
+        recommendations: list[str],
         output_filename: str = "executive_summary.md"
     ) -> Path:
         """

@@ -39,20 +39,30 @@ class TestNormalizeCNPJ:
         assert result == "12345678000190"
 
     def test_normalize_na_value(self):
-        """Test normalizing a NaN/None value."""
-        assert normalize_cnpj(None) == ""
-        assert normalize_cnpj(pd.NA) == ""
+        """Missing values are rejected, not coerced to a sentinel."""
+        assert normalize_cnpj(None) is None
+        assert normalize_cnpj(pd.NA) is None
 
     def test_normalize_empty_string(self):
-        """Test normalizing an empty string."""
-        result = normalize_cnpj("")
-        assert result == "00000000000000"
+        """An empty string is not a fund.
 
-    def test_normalize_truncates_long_cnpj(self):
-        """Test that long CNPJ values are truncated to 14 digits."""
-        result = normalize_cnpj("123456780001901234")
-        assert result == "12345678000190"
-        assert len(result) == 14
+        This used to return "00000000000000", so every blank cell in a CVM
+        export collapsed into one synthetic fund that joins would then group
+        together.
+        """
+        assert normalize_cnpj("") is None
+        assert normalize_cnpj("   ") is None
+
+    def test_normalize_rejects_long_cnpj_instead_of_truncating(self):
+        """Over-length input is rejected, never cut down to 14 digits.
+
+        Truncating turned a malformed value into a different, valid-looking
+        CNPJ -- silently reattributing findings to another fund.
+        """
+        assert normalize_cnpj("123456780001901234") is None
+
+    def test_normalize_rejects_digit_free_input(self):
+        assert normalize_cnpj("ABCDEFGHIJKLMN") is None
 
 
 class TestNormalizeCNPJSeries:
@@ -70,16 +80,25 @@ class TestNormalizeCNPJSeries:
             "12345678000190",
             "98765432000110",
             "12345678000190"
-        ])
+        ], dtype="string")
         pd.testing.assert_series_equal(result, expected)
 
     def test_normalize_series_with_na_values(self):
-        """Test normalizing a Series with NaN values."""
+        """Missing values stay missing rather than becoming a synthetic CNPJ."""
         series = pd.Series(["12.345.678/0001-90", None, "98.765.432/0001-10"])
         result = normalize_cnpj_series(series)
         assert result[0] == "12345678000190"
-        assert result[1] == ""
+        assert pd.isna(result[1])
         assert result[2] == "98765432000110"
+
+    def test_normalize_series_rejects_unusable_values(self):
+        """Blank, digit-free and over-length entries become NA, not fake funds."""
+        series = pd.Series(["", "ABC", "123456780001901234", "12345678000190"])
+        result = normalize_cnpj_series(series)
+        assert pd.isna(result[0])
+        assert pd.isna(result[1])
+        assert pd.isna(result[2])
+        assert result[3] == "12345678000190"
 
     def test_normalize_empty_series(self):
         """Test normalizing an empty Series."""
@@ -142,19 +161,21 @@ class TestIsValidCNPJ:
         assert is_valid_cnpj("123456") is True  # Gets padded to "00000000123456"
 
     def test_invalid_long_cnpj(self):
-        """Test validation of a long invalid CNPJ."""
-        # Long CNPJs get truncated to 14 digits
-        assert is_valid_cnpj("123456780001901234") is True  # Truncated to 14 digits
+        """Over-length input is invalid; it is not truncated into validity."""
+        assert is_valid_cnpj("123456780001901234") is False
 
     def test_invalid_non_numeric_cnpj(self):
-        """Test validation of a CNPJ with non-numeric characters."""
-        # After normalization, this becomes all zeros which is valid format
-        assert is_valid_cnpj("ABCDEFGHIJKLMN") is True  # Becomes "00000000000000"
+        """Digit-free input is invalid, not "00000000000000"."""
+        assert is_valid_cnpj("ABCDEFGHIJKLMN") is False
 
     def test_invalid_empty_cnpj(self):
-        """Test validation of an empty CNPJ."""
-        # Empty string normalizes to "00000000000000" which is valid format
-        assert is_valid_cnpj("") is True
+        """An empty CNPJ is invalid."""
+        assert is_valid_cnpj("") is False
+
+    def test_repeated_digit_cnpj_is_invalid(self):
+        """Placeholder registrations are rejected, matching validate_cnpj."""
+        assert is_valid_cnpj("00000000000000") is False
+        assert is_valid_cnpj("11111111111111") is False
 
     def test_invalid_none_cnpj(self):
         """Test validation of None."""
@@ -191,6 +212,74 @@ class TestFormatCNPJ:
         assert result == "00.000.000/0000-12"
 
     def test_format_empty_cnpj(self):
-        """Test formatting an empty CNPJ."""
-        result = format_cnpj("")
-        assert result == "00.000.000/0000-00"
+        """An unusable value is returned unchanged, not formatted into a fake CNPJ."""
+        assert format_cnpj("") == ""
+        assert format_cnpj("123456780001901234") == "123456780001901234"
+
+
+# ---------------------------------------------------------------------------
+# Property-based tests
+#
+# CNPJ is the join key across every CVM dataset, so these properties guard the
+# invariants that four divergent normalizers used to violate.
+# ---------------------------------------------------------------------------
+
+from hypothesis import given, strategies as st
+
+
+digit_strings = st.text(alphabet="0123456789", min_size=1, max_size=14)
+any_strings = st.text(max_size=30)
+
+
+class TestNormalizeProperties:
+
+    @given(digit_strings)
+    def test_output_is_always_14_digits_or_none(self, value):
+        result = normalize_cnpj(value)
+        assert result is not None
+        assert len(result) == 14
+        assert result.isdigit()
+
+    @given(any_strings)
+    def test_never_truncates(self, value):
+        """More than 14 digits must never yield a 14-digit answer."""
+        digits = "".join(ch for ch in value if ch.isdigit())
+        if len(digits) > 14:
+            assert normalize_cnpj(value) is None
+
+    @given(any_strings)
+    def test_idempotent(self, value):
+        once = normalize_cnpj(value)
+        assert normalize_cnpj(once) == once
+
+    @given(digit_strings)
+    def test_format_round_trips(self, value):
+        """format_cnpj then normalize_cnpj returns the normalized original."""
+        normalized = normalize_cnpj(value)
+        assert normalize_cnpj(format_cnpj(normalized)) == normalized
+
+    @given(any_strings)
+    def test_punctuation_is_irrelevant(self, value):
+        digits = "".join(ch for ch in value if ch.isdigit())
+        assert normalize_cnpj(value) == normalize_cnpj(digits)
+
+    @given(any_strings)
+    def test_validity_implies_normalizable(self, value):
+        if is_valid_cnpj(value):
+            assert normalize_cnpj(value) is not None
+
+    @given(st.lists(any_strings, max_size=20))
+    def test_series_matches_scalar(self, values):
+        """The vectorized path must agree with the scalar one, element-wise."""
+        series_result = normalize_cnpj_series(pd.Series(values, dtype="object"))
+        for i, value in enumerate(values):
+            scalar = normalize_cnpj(value)
+            if scalar is None:
+                assert pd.isna(series_result.iloc[i])
+            else:
+                assert series_result.iloc[i] == scalar
+
+    @given(st.lists(any_strings, max_size=20))
+    def test_list_matches_scalar(self, values):
+        expected = [normalize_cnpj(v) for v in values]
+        assert normalize_cnpj_list(values) == [v for v in expected if v is not None]
