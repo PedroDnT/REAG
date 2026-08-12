@@ -81,8 +81,21 @@ class CrossFundPriceDivergenceAnalyzer(BaseAnalyzer):
             logger.info("No positions with a usable declared unit price")
             return pd.DataFrame()
 
+        # Drop the groups that cannot yield a consensus before entering the
+        # loop. Without this the loop runs a nested pandas groupby on every
+        # asset-date pair just to discover it has fewer than three holders, and
+        # most assets are held by one or two funds: on a real CVM month that is
+        # 144,847 groups where only a few thousand can produce anything. The
+        # filter changes no result -- those groups return no findings either way.
+        holders = priced.groupby(["CD_ATIVO", "DT_COMPTC"])["CNPJ_FUNDO"].transform("nunique")
+        comparable = priced[holders >= MIN_FUNDS_FOR_CONSENSUS]
+        if comparable.empty:
+            logger.info("No asset is held by %d or more funds on a shared date",
+                        MIN_FUNDS_FOR_CONSENSUS)
+            return pd.DataFrame()
+
         findings: list[dict[str, Any]] = []
-        for (asset, comptc_date), group in priced.groupby(["CD_ATIVO", "DT_COMPTC"]):
+        for (asset, comptc_date), group in comparable.groupby(["CD_ATIVO", "DT_COMPTC"]):
             findings.extend(self._divergences_within_group(asset, comptc_date, group))
 
         if not findings:
