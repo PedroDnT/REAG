@@ -18,7 +18,7 @@ Os notebooks já produziram saídas em:
 - `data/processed/reag_summary_by_fund.csv`: agregados por fundo (somas de captação/resgate/fluxo e PL)
 - `reports/*.csv`: listas de eventos/anomalias
 
-Observação importante: os relatórios em `reports/` contêm datas em 2024 e também em 2025 (ex.: 2025-12-31). Isso sugere que a coleta/análise foi feita com janela que inclui 2025 ou com dados mais recentes do que “apenas 2024”. Para interpretação, vale confirmar o período configurado no momento da execução.
+Observação importante: os relatórios em `reports/` contêm datas em 2024 e também em 2025 (ex.: 2025-12-31), o que na época deixou o período em aberto. **Resolvido:** a janela é 2024-01-01 a 2025-12-31. Ela foi recuperada por checksum — `VOLUME_TOTAL` e `FLUXO_LIQ` são agregações puras do informe, imunes a mudanças de detector, e essa é a única janela contígua em que os 10 fundos de `TOP10_REAG_LAYER2.md` reproduzem os valores arquivados até o centavo. Ver aquele documento para os números reprocessados e o diff contra o arquivo original.
 
 ## 3) Visão geral quantitativa (screening)
 ### Universo REAG encontrado
