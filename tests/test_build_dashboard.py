@@ -148,3 +148,75 @@ class TestFormatCnpj:
 
     def test_leaves_anything_else_alone(self):
         assert format_cnpj("123") == "123"
+
+
+class TestPeriodIsAlwaysStated:
+    """A report that does not say what dates it covers cannot be rechecked.
+
+    Recovering the window behind an earlier analysis in this repo meant sweeping
+    two years of filings and matching aggregates to the cent, because nobody
+    wrote the dates down. The page states them or says plainly that it cannot.
+    """
+
+    def test_recorded_period_is_shown(self, run_dir):
+        import json as _json
+        summary = _json.loads((run_dir / "summary.json").read_text())
+        summary["data_period"] = {"start": "2026-06-01", "end": "2026-06-30",
+                                  "reporting_days": 21}
+        (run_dir / "summary.json").write_text(_json.dumps(summary))
+        page = render(load_run(run_dir))
+        assert "2026-06-01" in page and "2026-06-30" in page
+        assert "21 reporting days" in page
+
+    def test_missing_period_says_so_rather_than_showing_nothing(self, run_dir):
+        page = render(load_run(run_dir))
+        assert "Data period not recorded" in page
+
+    def test_analysis_timestamp_is_shown_when_recorded(self, run_dir):
+        import json as _json
+        summary = _json.loads((run_dir / "summary.json").read_text())
+        summary["generated_at"] = "2026-08-12T18:30:00"
+        (run_dir / "summary.json").write_text(_json.dumps(summary))
+        assert "2026-08-12 18:30:00" in render(load_run(run_dir))
+
+
+class TestRedFlagsAreExplained:
+
+    def test_every_mapped_signal_exists_in_the_registry(self):
+        """Stops SIGNAL_FOR_FILE drifting away from the registry it points at."""
+        from scripts.build_dashboard import SIGNAL_FOR_FILE
+        from src.explain.signal_registry import SIGNAL_REGISTRY
+
+        unknown = {v for v in SIGNAL_FOR_FILE.values() if v not in SIGNAL_REGISTRY}
+        assert not unknown, f"mapped to signals the registry does not define: {unknown}"
+
+    def test_a_fired_detector_carries_its_explanation(self, run_dir):
+        data = load_run(run_dir)
+        assert "runs" in data["explanations"]
+        note = data["explanations"]["runs"]
+        assert note["what"], "explanation text is empty"
+        assert note["caveats"], "a red flag without caveats invites over-reading"
+
+    def test_explanation_reaches_the_page(self, run_dir):
+        page = render(load_run(run_dir))
+        assert "What this means" in page
+        assert "Could also be" in page
+
+
+class TestMetricsSurviveWithoutBriefs:
+    """A full-universe run is written with --no-explain, so there are no briefs."""
+
+    def test_metric_and_severity_come_from_the_csv(self, run_dir, tmp_path):
+        import shutil
+        stripped = tmp_path / "nobriefs"
+        shutil.copytree(run_dir, stripped)
+        shutil.rmtree(stripped / "entities")
+        (stripped / "entities").mkdir()
+
+        # Give the CSV its own severity column, as the real detectors do.
+        (stripped / "findings" / "runs.csv").write_text(
+            f"CNPJ_FUNDO,RUN_LENGTH,severity\n{FUND_A},7,HIGH\n")
+
+        fund = next(f for f in load_run(stripped)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["severity"] == "HIGH"
+        assert fund["detail"]["runs"]["metric"] == "RUN_LENGTH: 7"

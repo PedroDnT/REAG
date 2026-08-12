@@ -46,7 +46,131 @@ logger = logging.getLogger(__name__)
 #: manager) and cannot take part in a per-fund matrix.
 FUND_KEY_COLUMNS = ("CNPJ_FUNDO", "fund_cnpj", "CNPJ")
 
+#: findings file -> the SIGNAL_REGISTRY entry that explains it. A file with no
+#: entry still appears in the matrix; it just carries no plain-language note.
+#: `test_every_mapped_signal_exists` stops this drifting from the registry.
+SIGNAL_FOR_FILE = {
+    "benford_violations": "benford_violation",
+    "circular_flow": "circular_flow",
+    "concentration_spikes": "concentration_violation",
+    "concentration_violations": "concentration_violation",
+    "cost_basis_anomalies": "cost_basis_anomaly",
+    "cross_fund_issuer": "cross_fund_issuer",
+    "cross_fund_price_divergence": "cross_fund_price_divergence",
+    "flow_anomalies": "flow_anomaly",
+    "layered_funds": "layered_funds",
+    "lifecycle_anomalies": "fund_lifecycle_anomaly",
+    "manager_network_anomalies": "manager_network_anomaly",
+    "peer_outliers": "peer_outlier",
+    "phantom_assets": "phantom_asset_exposure",
+    "phantom_assets_by_fund": "phantom_asset_exposure",
+    "pl_drops": "pl_drop",
+    "quotaholder_anomalies": "quotaholder_anomaly",
+    "reconciliation_gaps": "portfolio_reconciliation_gap",
+    "runs": "redemption_run",
+    "shell_networks": "shell_network",
+    "valuation_smoothing": "valuation_smoothing",
+    "window_dressing": "window_dressing",
+}
+
+#: Metric columns worth quoting, in preference order, when reading a findings
+#: CSV directly. Mirrors what the briefs quote.
+METRIC_COLUMNS = (
+    "Z_SCORE_FLOW", "PL_VAR_PCT", "RUN_LENGTH", "divergence_pct", "PCT_CARTEIRA",
+    "top1_pct", "sharpe_zscore", "pl_mad", "pct_change", "per_capita_aum",
+    "gain_ratio", "gap_pct", "max_pl", "days_active", "deviation_pct",
+    "autocorrelation", "vol_ratio", "stale_days", "DIVERGENCE_SCORE",
+    "total_value", "num_funds_holding", "similarity",
+)
+
 SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+
+def _trim(value: Any) -> str:
+    """Render a metric for a person, not a float dump."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number.is_integer() and abs(number) < 1e15:
+        return str(int(number))
+    return f"{number:.2f}" if abs(number) >= 1000 else f"{number:.4g}"
+
+
+def _names_from_cadastro(summary: dict[str, Any]) -> dict[str, str]:
+    """Fund names, read from the registry the run itself used.
+
+    Briefs carry names, but a full-universe run is written with --no-explain,
+    so the names have to come from the same registry snapshot the run loaded --
+    otherwise search by name works on a scoped run and silently stops working
+    on the big one.
+    """
+    path = (summary.get("args") or {}).get("cadastro")
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        from src.processors.data_processor import DataProcessor
+        registry = DataProcessor().read_registro_fundo_classe(Path(path))
+    except Exception as exc:  # noqa: BLE001 - names are a nicety, never fatal
+        logger.warning("Could not read fund names from %s: %s", path, exc)
+        return {}
+    if registry.empty or "CNPJ_FUNDO" not in registry.columns:
+        return {}
+    name_col = next((c for c in ("DENOM_SOCIAL", "NM_FUNDO") if c in registry.columns), None)
+    if not name_col:
+        return {}
+    pairs = registry[["CNPJ_FUNDO", name_col]].dropna()
+    return {str(c): str(n).strip() for c, n in zip(pairs["CNPJ_FUNDO"], pairs[name_col],
+                                                   strict=False)}
+
+
+def _period(summary: dict[str, Any]) -> dict[str, Any]:
+    """The window the findings cover, however the run recorded it."""
+    recorded = summary.get("data_period") or {}
+    if recorded.get("start"):
+        return recorded
+    # Older runs predate the field. Derive it from the informe they used rather
+    # than showing a report with no period on it.
+    path = (summary.get("args") or {}).get("informe")
+    if not path or not Path(path).exists():
+        return {}
+    try:
+        dates = pd.read_csv(path, sep=";", encoding="latin1",
+                            usecols=lambda c: c.strip().upper().startswith("DT_COMPTC"))
+        col = dates.columns[0]
+        parsed = pd.to_datetime(dates[col], errors="coerce").dropna()
+        if parsed.empty:
+            return {}
+        return {"start": parsed.min().date().isoformat(),
+                "end": parsed.max().date().isoformat(),
+                "reporting_days": int(parsed.dt.date.nunique()), "derived": True}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not derive the data period: %s", exc)
+        return {}
+
+
+def _explanations(tests: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Plain-language notes for the detectors on this page.
+
+    Curated already in SIGNAL_REGISTRY -- what the flag means, what would
+    explain it innocently, and what to check next. A red flag without its
+    caveats invites exactly the over-reading this toolkit warns against.
+    """
+    from src.explain.signal_registry import SIGNAL_REGISTRY
+
+    out: dict[str, dict[str, Any]] = {}
+    for test in tests:
+        signal = test.get("signal")
+        definition = SIGNAL_REGISTRY.get(signal) if signal else None
+        if not definition:
+            continue
+        out[test["key"]] = {
+            "title": definition.title,
+            "what": definition.plain_language_explanation,
+            "caveats": list(definition.caveats),
+            "next_steps": list(definition.next_steps),
+        }
+    return out
 
 
 def format_cnpj(digits: str) -> str:
@@ -73,6 +197,7 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     # --- which detectors ran, and which are fund-keyed ---------------------
     tests: dict[str, dict[str, Any]] = {}
     fund_hits: dict[str, set[str]] = {}
+    csv_detail: dict[str, dict[str, dict[str, Any]]] = {}
     entity_level: list[str] = []
 
     for csv_path in sorted((run_dir / "findings").glob("*.csv")):
@@ -94,15 +219,32 @@ def load_run(run_dir: Path) -> dict[str, Any]:
         # That is a clean result for every fund, and must not be filed as
         # "not applicable" -- treating "found nothing" as "said nothing" is the
         # exact conflation this page exists to prevent.
-        tests[key] = {"key": key, "rows": int(len(frame))}
+        tests[key] = {"key": key, "rows": int(len(frame)), "signal": SIGNAL_FOR_FILE.get(key)}
         if column is None:
             continue
-        cnpjs = normalize_cnpj_series(frame[column]).dropna()
-        for cnpj in cnpjs.unique():
-            fund_hits.setdefault(str(cnpj), set()).add(key)
 
-    # --- per-fund evidence, for the metric behind each hit -----------------
-    evidence: dict[str, list[dict[str, Any]]] = {}
+        metric_col = next((c for c in METRIC_COLUMNS if c in frame.columns), None)
+        work = frame.assign(_cnpj=normalize_cnpj_series(frame[column])).dropna(subset=["_cnpj"])
+        for cnpj, group in work.groupby("_cnpj", sort=False):
+            cnpj = str(cnpj)
+            fund_hits.setdefault(cnpj, set()).add(key)
+            severities = [str(v).upper() for v in group.get("severity", pd.Series(dtype=str))
+                          if isinstance(v, str)]
+            worst = max(severities, key=lambda x: SEVERITY_RANK.get(x, 0), default="")
+            metric = ""
+            if metric_col:
+                values = group[metric_col].dropna()
+                if len(values):
+                    metric = f"{metric_col}: {_trim(values.iloc[0])}"
+            csv_detail.setdefault(cnpj, {})[key] = {
+                "test": key,
+                "severity": worst if worst in SEVERITY_RANK else "",
+                "metric": metric,
+                "events": int(len(group)),
+            }
+
+    # --- names, and the metric each brief chose (when briefs were written) ---
+    evidence: dict[str, dict[str, dict[str, Any]]] = {}
     names: dict[str, str] = {}
     for path in sorted((run_dir / "entities").glob("*/evidence.json")):
         payload = json.loads(path.read_text())
@@ -116,12 +258,22 @@ def load_run(run_dir: Path) -> dict[str, Any]:
             names[cnpj] = str(entity["name"]).strip()
         for item in payload.get("evidence") or []:
             source = str(item.get("source_ref") or "")
-            evidence.setdefault(cnpj, []).append({
-                "test": Path(source).stem if source else "",
+            test = Path(source).stem if source else ""
+            if not test:
+                continue
+            current = evidence.setdefault(cnpj, {}).get(test)
+            candidate = {
+                "test": test,
                 "title": item.get("title") or "",
                 "severity": (item.get("severity") or "").upper(),
                 "metric": item.get("metric") or "",
-            })
+            }
+            if not current or SEVERITY_RANK.get(candidate["severity"], 0) > SEVERITY_RANK.get(
+                current["severity"], 0
+            ):
+                evidence[cnpj][test] = candidate
+
+    names.update(_names_from_cadastro(summary))
 
     # --- the fund universe -------------------------------------------------
     in_scope = [normalize_cnpj(c) for c in (scope.get("selected_cnpjs") or [])]
@@ -130,34 +282,40 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     funds = []
     for cnpj in universe:
         hits = sorted(fund_hits.get(cnpj, set()))
-        items = evidence.get(cnpj, [])
-        by_test: dict[str, dict[str, Any]] = {}
-        for item in items:
-            current = by_test.get(item["test"])
-            if not current or SEVERITY_RANK.get(item["severity"], 0) > SEVERITY_RANK.get(
-                current["severity"], 0
-            ):
-                by_test[item["test"]] = item
-        worst = max(
-            (SEVERITY_RANK.get(i["severity"], 0) for i in items), default=0
-        )
+        detail: dict[str, dict[str, Any]] = {}
+        for test in hits:
+            base = dict(csv_detail.get(cnpj, {}).get(test, {"test": test}))
+            # A brief, when one was written, already picked the metric a reader
+            # should see and graded it. Prefer that; fall back to the CSV so the
+            # page still works for a --no-explain run over the full universe.
+            brief = (evidence.get(cnpj) or {}).get(test)
+            if brief:
+                base["severity"] = brief["severity"] or base.get("severity", "")
+                base["metric"] = brief["metric"] or base.get("metric", "")
+                base["title"] = brief.get("title", "")
+            detail[test] = base
+        worst = max((SEVERITY_RANK.get(d.get("severity", ""), 0) for d in detail.values()),
+                    default=0)
         funds.append({
             "cnpj": cnpj,
             "display": format_cnpj(cnpj),
             "name": names.get(cnpj, ""),
             "hits": hits,
-            "detail": by_test,
-            "severity": next((s for s, r in SEVERITY_RANK.items() if r == worst), ""),
+            "detail": detail,
+            "severity": next((s_ for s_, r in SEVERITY_RANK.items() if r == worst), ""),
             "count": len(hits),
         })
 
     funds.sort(key=lambda f: (-SEVERITY_RANK.get(f["severity"], 0), -f["count"], f["cnpj"]))
 
+    test_list = [tests[k] for k in sorted(tests)]
     return {
         "run_id": summary.get("run_id") or run_dir.name,
         "generated_at": summary.get("generated_at") or "",
+        "period": _period(summary),
+        "explanations": _explanations(test_list),
         "scope": scope,
-        "tests": [tests[k] for k in sorted(tests)],
+        "tests": test_list,
         "entity_level": sorted(entity_level),
         "skipped": sorted(execution.get("skipped_analyzers") or []),
         "failed": sorted(execution.get("failed_analyzers") or []),
@@ -166,9 +324,40 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _compact(data: dict[str, Any]) -> dict[str, Any]:
+    """Re-encode the fund table columnar.
+
+    One object per fund repeats its keys 25,509 times; on a full CVM month that
+    is most of the file. Funds become tuples against a shared test index, which
+    takes the payload from roughly 20 MB to under 3 MB with no loss.
+    """
+    keys = [t["key"] for t in data["tests"]]
+    index = {k: i for i, k in enumerate(keys)}
+    sev = ["", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
+    rows = []
+    for fund in data["funds"]:
+        hits = []
+        for test in fund["hits"]:
+            d = fund["detail"].get(test, {})
+            hits.append([
+                index.get(test, -1),
+                sev.index(d.get("severity", "")) if d.get("severity", "") in sev else 0,
+                d.get("metric", ""),
+                d.get("events", 1),
+            ])
+        rows.append([fund["cnpj"], fund["name"], sev.index(fund["severity"])
+                     if fund["severity"] in sev else 0, hits])
+
+    out = {k: v for k, v in data.items() if k != "funds"}
+    out["severities"] = sev
+    out["rows"] = rows
+    return out
+
+
 def render(data: dict[str, Any], *, fragment: bool = False) -> str:
     """Render the dashboard to a single HTML document."""
-    payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    payload = json.dumps(_compact(data), ensure_ascii=False, separators=(",", ":"))
     scope = data["scope"]
     where = ""
     if scope.get("fund_mode"):
@@ -178,8 +367,11 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
 <header class="masthead">
   <div class="masthead-id">
     <h1>Fund screening</h1>
-    <p class="run">run <code>{html.escape(str(data['run_id']))}</code>{
-        ' · ' + html.escape(where) if where else ''}</p>
+    <p class="run">{_period_line(data)}</p>
+    <p class="run subtle">run <code>{html.escape(str(data['run_id']))}</code>{
+        ' · ' + html.escape(where) if where else ''}{
+        ' · analysed ' + html.escape(str(data['generated_at']).replace('T', ' '))
+        if data.get('generated_at') else ''}</p>
   </div>
   <dl class="tallies">
     <div><dt>Funds in scope</dt><dd>{len(data['funds'])}</dd></div>
@@ -230,6 +422,19 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
         f"<title>Fund screening — {html.escape(str(data['run_id']))}</title>\n"
         f"<style>{_STYLE}</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
+
+
+def _period_line(data: dict[str, Any]) -> str:
+    """The dates the findings cover. A report without them cannot be rechecked."""
+    period = data.get("period") or {}
+    if not period.get("start"):
+        return '<strong class="no-period">Data period not recorded</strong>'
+    start, end = html.escape(period["start"]), html.escape(period["end"])
+    days = period.get("reporting_days")
+    extra = f' · {days} reporting days' if days else ""
+    derived = ' <span class="derived">(derived from the source file)</span>' if period.get(
+        "derived") else ""
+    return f'<strong>Filings from {start} to {end}</strong>{extra}{derived}'
 
 
 def _coverage_banner(data: dict[str, Any]) -> str:
@@ -310,7 +515,11 @@ code,.mono,.cnpj,.metric{
   margin:0; font-size:1.35rem; font-weight:620; letter-spacing:-.01em;
   text-wrap:balance;
 }
-.run{margin:4px 0 0; color:var(--ink-faint); font-size:.82rem}
+.run{margin:5px 0 0; color:var(--ink-soft); font-size:.86rem}
+.run.subtle{color:var(--ink-faint); font-size:.78rem}
+.run strong{font-weight:600; color:var(--ink)}
+.no-period{color:var(--medium)}
+.derived{color:var(--ink-faint); font-weight:400}
 .run code{font-size:.82rem; color:var(--ink-soft)}
 
 .tallies{display:flex; gap:28px; margin:0}
@@ -433,6 +642,32 @@ code,.mono,.cnpj,.metric{
 }
 .unrun-why{margin:5px 0 0; font-size:.72rem; color:var(--unrun); font-style:italic}
 
+.explain{margin:7px 0 0}
+.explain summary{
+  cursor:pointer; font-size:.71rem; color:var(--accent);
+  letter-spacing:.03em; list-style:none;
+}
+.explain summary::-webkit-details-marker{display:none}
+.explain summary::before{content:"▸ "; font-size:.85em}
+.explain[open] summary::before{content:"▾ "}
+.explain summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+.explain-body{
+  margin-top:7px; padding-left:9px; border-left:2px solid var(--line);
+  font-size:.76rem; color:var(--ink-soft);
+}
+.explain-body p{margin:0 0 6px}
+.explain-body .lbl{
+  display:block; font-size:.63rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--ink-faint); margin:8px 0 3px;
+}
+.explain-body ul{margin:0; padding-left:16px}
+.explain-body li{margin:0 0 3px}
+
+.truncation{
+  margin:10px clamp(14px,3vw,20px); padding:8px 11px; border-radius:7px;
+  background:var(--sunken); color:var(--ink-soft); font-size:.76rem;
+}
+
 .section-label{
   margin:26px 0 0; font-size:.68rem; letter-spacing:.09em;
   text-transform:uppercase; color:var(--ink-faint);
@@ -452,6 +687,26 @@ _SCRIPT = r"""
 (function(){
   var D = JSON.parse(document.getElementById('data').textContent);
   var testKeys = D.tests.map(function(t){ return t.key; });
+
+  // Rehydrate the columnar payload (see _compact in build_dashboard.py).
+  D.funds = D.rows.map(function(r){
+    var detail = {}, hits = [];
+    r[3].forEach(function(h){
+      var key = testKeys[h[0]];
+      if (key === undefined) return;
+      hits.push(key);
+      detail[key] = {severity: D.severities[h[1]] || '', metric: h[2], events: h[3]};
+    });
+    return {cnpj: r[0], display: fmtCnpj(r[0]), name: r[1],
+            severity: D.severities[r[2]] || '', hits: hits, detail: detail,
+            count: hits.length};
+  });
+
+  function fmtCnpj(d){
+    return d.length === 14
+      ? d.slice(0,2)+'.'+d.slice(2,5)+'.'+d.slice(5,8)+'/'+d.slice(8,12)+'-'+d.slice(12)
+      : d;
+  }
   var unrun = D.failed.concat(D.skipped);
   var listEl = document.getElementById('funds');
   var countEl = document.getElementById('count');
@@ -467,6 +722,24 @@ _SCRIPT = r"""
   }
   function label(key){ return key.replace(/_/g,' '); }
 
+  // What the flag means, what would explain it innocently, what to check next.
+  // Collapsed by default: the matrix is for scanning, this is for deciding.
+  function explain(key){
+    var e = D.explanations[key];
+    if (!e) return '';
+    var body = '<p>' + esc(e.what) + '</p>';
+    if (e.caveats && e.caveats.length){
+      body += '<span class="lbl">Could also be</span><ul>' +
+        e.caveats.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>';
+    }
+    if (e.next_steps && e.next_steps.length){
+      body += '<span class="lbl">What would settle it</span><ul>' +
+        e.next_steps.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>';
+    }
+    return '<details class="explain"><summary>What this means</summary>' +
+      '<div class="explain-body">' + body + '</div></details>';
+  }
+
   function matches(f, q){
     if (!q) return true;
     return (f.cnpj.indexOf(q) !== -1) ||
@@ -481,15 +754,26 @@ _SCRIPT = r"""
       return matches(f, q) && (!flaggedOnly || f.count > 0);
     });
 
-    countEl.textContent = rows.length + (rows.length === 1 ? ' fund' : ' funds') +
-      (q || flaggedOnly ? ' of ' + D.funds.length : '');
+    var total = rows.length;
+    // 25k rows would be 25k DOM nodes for a list nobody scrolls to the end of.
+    // Cap it and say so; search is the way through, not scrolling.
+    var CAP = 250;
+    var capped = total > CAP;
+    if (capped) rows = rows.slice(0, CAP);
 
-    if (!rows.length){
+    countEl.textContent = (capped ? 'showing ' + CAP + ' of ' + total : total) +
+      (total === 1 ? ' fund' : ' funds') +
+      (q || flaggedOnly ? ' matching' : '');
+
+    if (!total){
       listEl.innerHTML = '<li class="no-hits"><p class="empty" style="padding:14px 20px">' +
         'No fund matches that search.</p></li>';
       return;
     }
-    listEl.innerHTML = rows.map(function(f){
+    listEl.innerHTML = (capped
+      ? '<li><p class="truncation">Showing the ' + CAP + ' most severe of ' + total +
+        ' matches. Narrow the search to see the rest.</p></li>'
+      : '') + rows.map(function(f){
       return '<li><button class="fund-btn" data-cnpj="' + f.cnpj + '"' +
         (selected === f.cnpj ? ' aria-current="true"' : '') + '>' +
         '<span class="stripe ' + esc(f.severity) + '"></span>' +
@@ -512,10 +796,13 @@ _SCRIPT = r"""
     var cards = testKeys.map(function(key){
       var hit = f.detail[key];
       if (hit){
+        var sev = hit.severity || 'flagged';
         return '<li class="test is-fired">' +
           '<div class="test-name"><span>' + esc(hit.title || label(key)) + '</span>' +
-          '<span class="chip ' + esc(hit.severity) + '">' + esc(hit.severity) + '</span></div>' +
+          '<span class="chip ' + esc(hit.severity) + '">' + esc(sev) + '</span></div>' +
           (hit.metric ? '<p class="metric">' + esc(hit.metric) + '</p>' : '') +
+          (hit.events > 1 ? '<p class="metric">' + hit.events + ' events</p>' : '') +
+          explain(key) +
           '</li>';
       }
       if (f.hits.indexOf(key) !== -1){

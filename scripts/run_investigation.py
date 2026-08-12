@@ -402,6 +402,7 @@ def run_investigation(args: argparse.Namespace) -> int:
         failures=failures,
         skipped=skipped,
         selected_cnpjs=loaded.selected_cnpjs,
+        data_period=_data_period(loaded.informe),
     )
 
     exit_code = 1 if (failures and getattr(args, "strict", False)) else 0
@@ -791,6 +792,28 @@ def _save_finding(df: pd.DataFrame, path: Path) -> str:
         return str(path)
 
 
+def _data_period(informe: pd.DataFrame | None) -> dict[str, Any]:
+    """The date range the findings actually cover.
+
+    A report that does not record its own period cannot be checked later. This
+    repo learned that the hard way: reconstructing the window behind an earlier
+    analysis meant sweeping two years of filings and matching aggregate totals
+    to the cent, because nobody wrote the dates down.
+    """
+    if informe is None or informe.empty or "DT_COMPTC" not in informe.columns:
+        return {}
+    dates = pd.to_datetime(informe["DT_COMPTC"], errors="coerce").dropna()
+    if dates.empty:
+        return {}
+    return {
+        "start": dates.min().date().isoformat(),
+        "end": dates.max().date().isoformat(),
+        "reporting_days": int(dates.dt.date.nunique()),
+        "funds_reporting": int(informe["CNPJ_FUNDO"].nunique())
+        if "CNPJ_FUNDO" in informe.columns else None,
+    }
+
+
 def _write_run_metadata(
     *,
     output_dir: Path,
@@ -801,6 +824,7 @@ def _write_run_metadata(
     failures: list[str] | None = None,
     skipped: list[str] | None = None,
     selected_cnpjs: list[str] | None = None,
+    data_period: dict[str, Any] | None = None,
 ) -> None:
     # Prefer the scope the load actually resolved -- otherwise a --fund-mode run
     # reports 0 funds while having filtered to that administrator's funds. Fall
@@ -812,6 +836,8 @@ def _write_run_metadata(
     meta = {
         "run_id": run_id,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
+        # What the findings cover, not just when they were produced.
+        "data_period": data_period or {},
         "args": vars(args),
         "scope": {
             "fund_filter_enabled": bool(selected_cnpjs),
