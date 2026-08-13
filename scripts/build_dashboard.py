@@ -84,6 +84,29 @@ METRIC_COLUMNS = (
 )
 
 SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+LEAD_TIER_RANK = {"NO_SIGNAL": 0, "OBSERVE": 1, "REVIEW": 2, "INVESTIGATE": 3}
+
+# Independent evidence families. Multiple detectors measuring the same
+# phenomenon corroborate less than signals spanning flows, holdings and
+# valuation, so lead tiers count families rather than raw detector hits.
+SIGNAL_FAMILY = {
+    "benford_violations": "statistical",
+    "peer_outliers": "statistical",
+    "valuation_smoothing": "statistical",
+    "flow_anomalies": "flows",
+    "pl_drops": "flows",
+    "runs": "flows",
+    "window_dressing": "flows",
+    "concentration_spikes": "portfolio",
+    "concentration_violations": "portfolio",
+    "reconciliation_gaps": "portfolio",
+    "divergences": "portfolio",
+    "cost_basis_anomalies": "valuation",
+    "cross_fund_price_divergence": "valuation",
+    "phantom_assets_by_fund": "registry",
+    "quotaholder_anomalies": "ownership",
+    "lifecycle_anomalies": "lifecycle",
+}
 
 #: Alternate severity columns, in preference order. Detectors do not agree on a
 #: single name; without this mapping the matrix grades almost every hit as blank
@@ -207,6 +230,55 @@ def _names_from_cadastro(summary: dict[str, Any]) -> dict[str, str]:
     pairs = registry[["CNPJ_FUNDO", name_col]].dropna()
     return {str(c): str(n).strip() for c, n in zip(pairs["CNPJ_FUNDO"], pairs[name_col],
                                                    strict=False)}
+
+
+def _reporting_cnpjs(summary: dict[str, Any]) -> set[str]:
+    """CNPJs present in the informe, including funds with no detector signal."""
+    path = (summary.get("args") or {}).get("informe")
+    if not path or not Path(path).exists() or Path(path).is_dir():
+        return set()
+
+    try:
+        header = pd.read_csv(path, sep=";", nrows=0, encoding="utf-8")
+    except UnicodeDecodeError:
+        header = pd.read_csv(path, sep=";", nrows=0, encoding="latin1")
+    column = next(
+        (name for name in ("CNPJ_FUNDO", "CNPJ_FUNDO_CLASSE") if name in header.columns),
+        None,
+    )
+    if not column:
+        return set()
+
+    try:
+        frame = pd.read_csv(
+            path, sep=";", usecols=[column], dtype=str, encoding="utf-8"
+        )
+    except UnicodeDecodeError:
+        frame = pd.read_csv(
+            path, sep=";", usecols=[column], dtype=str, encoding="latin1"
+        )
+    normalized = normalize_cnpj_series(frame[column]).dropna()
+    return {str(value) for value in normalized}
+
+
+def _lead_tier(detail: dict[str, dict[str, Any]]) -> tuple[str, int]:
+    """Return lead tier and independent evidence-family count."""
+    families = {
+        SIGNAL_FAMILY.get(test, test)
+        for test in detail
+    }
+    strong_families = {
+        SIGNAL_FAMILY.get(test, test)
+        for test, finding in detail.items()
+        if SEVERITY_RANK.get(finding.get("severity", ""), 0) >= 3
+    }
+    if len(strong_families) >= 2:
+        return "INVESTIGATE", len(families)
+    if strong_families or len(families) >= 3:
+        return "REVIEW", len(families)
+    if detail:
+        return "OBSERVE", len(families)
+    return "NO_SIGNAL", 0
 
 
 def _period(summary: dict[str, Any]) -> dict[str, Any]:
@@ -377,7 +449,13 @@ def load_run(run_dir: Path) -> dict[str, Any]:
 
     # --- the fund universe -------------------------------------------------
     in_scope = [normalize_cnpj(c) for c in (scope.get("selected_cnpjs") or [])]
-    universe = sorted({c for c in in_scope if c} | set(fund_hits) | set(evidence))
+    reporting_cnpjs = _reporting_cnpjs(summary)
+    universe = sorted(
+        {c for c in in_scope if c}
+        | reporting_cnpjs
+        | set(fund_hits)
+        | set(evidence)
+    )
 
     funds = []
     for cnpj in universe:
@@ -396,6 +474,7 @@ def load_run(run_dir: Path) -> dict[str, Any]:
             detail[test] = base
         worst = max((SEVERITY_RANK.get(d.get("severity", ""), 0) for d in detail.values()),
                     default=0)
+        tier, family_count = _lead_tier(detail)
         funds.append({
             "cnpj": cnpj,
             "display": format_cnpj(cnpj),
@@ -404,9 +483,18 @@ def load_run(run_dir: Path) -> dict[str, Any]:
             "detail": detail,
             "severity": next((s_ for s_, r in SEVERITY_RANK.items() if r == worst), ""),
             "count": len(hits),
+            "tier": tier,
+            "family_count": family_count,
+            "reported": cnpj in reporting_cnpjs,
         })
 
-    funds.sort(key=lambda f: (-SEVERITY_RANK.get(f["severity"], 0), -f["count"], f["cnpj"]))
+    funds.sort(key=lambda f: (
+        -LEAD_TIER_RANK[f["tier"]],
+        -f["family_count"],
+        -SEVERITY_RANK.get(f["severity"], 0),
+        -f["count"],
+        f["cnpj"],
+    ))
 
     test_list = [tests[k] for k in sorted(tests)]
     return {
@@ -415,6 +503,7 @@ def load_run(run_dir: Path) -> dict[str, Any]:
         "period": _period(summary),
         "explanations": _explanations(test_list),
         "scope": scope,
+        "reporting_funds": len(reporting_cnpjs),
         "tests": test_list,
         "entity_level": sorted(entity_level),
         "skipped": sorted(execution.get("skipped_analyzers") or []),
@@ -450,6 +539,7 @@ def _compact(data: dict[str, Any]) -> dict[str, Any]:
     keys = [t["key"] for t in data["tests"]]
     index = {k: i for i, k in enumerate(keys)}
     sev = ["", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    tiers = ["NO_SIGNAL", "OBSERVE", "REVIEW", "INVESTIGATE"]
 
     rows = []
     for fund in data["funds"]:
@@ -462,8 +552,15 @@ def _compact(data: dict[str, Any]) -> dict[str, Any]:
                 d.get("metric", ""),
                 d.get("events", 1),
             ])
-        rows.append([fund["cnpj"], fund["name"], sev.index(fund["severity"])
-                     if fund["severity"] in sev else 0, hits])
+        rows.append([
+            fund["cnpj"],
+            fund["name"],
+            sev.index(fund["severity"]) if fund["severity"] in sev else 0,
+            hits,
+            tiers.index(fund["tier"]),
+            fund["family_count"],
+            1 if fund["reported"] else 0,
+        ])
 
     out = {k: v for k, v in data.items() if k != "funds"}
     # selected_cnpjs repeats every CNPJ already carried in `rows` -- on a full
@@ -472,6 +569,7 @@ def _compact(data: dict[str, Any]) -> dict[str, Any]:
     out["scope"] = {k: v for k, v in (out.get("scope") or {}).items()
                     if k != "selected_cnpjs"}
     out["severities"] = sev
+    out["tiers"] = tiers
     out["rows"] = rows
     return out
 
@@ -482,7 +580,9 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
     scope = data["scope"]
     where = ""
     if scope.get("fund_mode"):
-        where = f"{scope['fund_mode'].replace('_', ' ')} · {scope.get('fund_identifier', '')}"
+        where = scope["fund_mode"].replace("_", " ")
+        if scope.get("fund_identifier"):
+            where += f" · {scope['fund_identifier']}"
 
     body = f"""
 <header class="masthead">
@@ -495,30 +595,35 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
         if data.get('generated_at') else ''}</p>
   </div>
   <dl class="tallies">
-    <div><dt>Funds in scope</dt><dd>{len(data['funds'])}</dd></div>
-    <div><dt>Detectors run</dt><dd>{len(data['tests'])}</dd></div>
-    <div><dt>With any signal</dt><dd>{sum(1 for f in data['funds'] if f['count'])}</dd></div>
-    <div><dt>Priority review</dt><dd>{
-        sum(1 for f in data['funds'] if SEVERITY_RANK.get(f['severity'], 0) >= 3)
+    <div><dt>Reporting funds</dt><dd>{data.get('reporting_funds') or len(data['funds'])}</dd></div>
+    <div><dt>Investigate</dt><dd>{
+        sum(1 for f in data['funds'] if f['tier'] == 'INVESTIGATE')
+    }</dd></div>
+    <div><dt>Review</dt><dd>{
+        sum(1 for f in data['funds'] if f['tier'] == 'REVIEW')
+    }</dd></div>
+    <div><dt>No signal</dt><dd>{
+        sum(1 for f in data['funds'] if f['tier'] == 'NO_SIGNAL')
     }</dd></div>
   </dl>
 </header>
 
 {_lead_banner()}
 {_coverage_banner(data)}
+{_entity_level_banner(data)}
 
 <main class="split">
   <section class="list-pane" aria-label="Funds">
     <div class="searchbar">
       <input id="q" type="search" autocomplete="off" spellcheck="false"
              placeholder="Search by CNPJ or fund name" aria-label="Search funds">
-      <label class="only-flagged">
-        <input type="checkbox" id="priority" checked>
-        Priority only (HIGH / CRITICAL)
-      </label>
-      <label class="only-flagged">
-        <input type="checkbox" id="only"> Any signal
-      </label>
+      <fieldset class="queue-filter">
+        <legend>Queue</legend>
+        <label><input type="radio" name="queue" value="INVESTIGATE" checked> Investigate</label>
+        <label><input type="radio" name="queue" value="REVIEW"> Review+</label>
+        <label><input type="radio" name="queue" value="SIGNAL"> Any signal</label>
+        <label><input type="radio" name="queue" value="ALL"> All reporting funds</label>
+      </fieldset>
     </div>
     <p class="result-count" id="count" role="status"></p>
     <ol class="funds" id="funds"></ol>
@@ -573,9 +678,26 @@ def _lead_banner() -> str:
     return (
         '<p class="coverage lead">'
         "<strong>Leads, not verdicts.</strong> "
-        "An outlier or red flag means &ldquo;worth a look,&rdquo; not "
-        "&ldquo;this fund is fraudulent.&rdquo; Start with Priority review; "
-        "most signals have an innocent explanation."
+        "Investigate means strong signals in at least two independent evidence "
+        "families; Review means one strong or several weaker families. Neither "
+        "means fraud. Most signals have an innocent explanation."
+        "</p>"
+    )
+
+
+def _entity_level_banner(data: dict[str, Any]) -> str:
+    """Surface network/issuer checks that cannot be keyed to one fund row."""
+    checks = data.get("entity_level") or []
+    if not checks:
+        return ""
+    labels = ", ".join(
+        html.escape(check.replace("_", " ")) for check in checks
+    )
+    return (
+        '<p class="coverage entity">'
+        "<strong>Network and issuer checks:</strong> "
+        f"{labels}. These ran outside the per-fund matrix and require "
+        "counterparty/network review."
         "</p>"
     )
 
@@ -685,6 +807,7 @@ code,.mono,.cnpj,.metric{
 .coverage.warn{color:var(--medium); background:var(--sunken)}
 .coverage.lead{color:var(--ink); background:var(--accent-soft)}
 .coverage.lead strong{font-weight:650}
+.coverage.entity{color:var(--ink-soft); background:var(--panel)}
 .coverage code{font-size:.82em}
 .empty-note{margin:8px 0 0; color:var(--ink-faint); font-size:.9rem}
 
@@ -707,9 +830,18 @@ code,.mono,.cnpj,.metric{
   background:var(--panel); color:var(--ink); font:inherit; font-size:.9rem;
 }
 #q:focus-visible{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent}
-.only-flagged{
-  display:flex; align-items:center; gap:6px;
-  font-size:.79rem; color:var(--ink-soft); white-space:nowrap; cursor:pointer;
+.queue-filter{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin:0; padding:0; border:0;
+  font-size:.76rem; color:var(--ink-soft);
+}
+.queue-filter legend{position:absolute; width:1px; height:1px; overflow:hidden}
+.queue-filter label{
+  display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;
+  padding:4px 7px; border:1px solid var(--line); border-radius:999px;
+}
+.queue-filter label:has(input:checked){
+  color:var(--accent); background:var(--accent-soft); border-color:var(--accent);
 }
 .result-count{
   margin:0; padding:0 clamp(14px,3vw,20px) 10px;
@@ -751,12 +883,12 @@ code,.mono,.cnpj,.metric{
 
 .detail-head h2{margin:0; font-size:1.05rem; font-weight:600}
 .detail-head .cnpj{margin-top:3px; color:var(--ink-soft); font-size:.85rem}
-.verdict{
+.summary-badge{
   display:inline-block; margin:12px 0 4px; padding:3px 10px; border-radius:999px;
   font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; font-weight:600;
 }
-.verdict.flagged{background:var(--critical); color:#fff}
-.verdict.clear{background:var(--clean-soft); color:var(--clean); border:1px solid currentColor}
+.summary-badge.signal{background:var(--accent-soft); color:var(--accent); border:1px solid currentColor}
+.summary-badge.clear{background:var(--clean-soft); color:var(--clean); border:1px solid currentColor}
 
 .matrix{
   display:grid; gap:8px; margin:16px 0 0; padding:0; list-style:none;
@@ -846,7 +978,8 @@ _SCRIPT = r"""
     });
     return {cnpj: r[0], display: fmtCnpj(r[0]), name: r[1],
             severity: D.severities[r[2]] || '', hits: hits, detail: detail,
-            count: hits.length};
+            count: hits.length, tier: D.tiers[r[4]] || 'NO_SIGNAL',
+            familyCount: r[5] || 0, reported: Boolean(r[6])};
   });
 
   function fmtCnpj(d){
@@ -859,10 +992,11 @@ _SCRIPT = r"""
   var countEl = document.getElementById('count');
   var detailEl = document.getElementById('detail');
   var qEl = document.getElementById('q');
-  var onlyEl = document.getElementById('only');
-  var priorityEl = document.getElementById('priority');
+  var queueEls = Array.prototype.slice.call(
+    document.querySelectorAll('input[name="queue"]')
+  );
   var selected = null;
-  var SEV_RANK = {LOW:1, MEDIUM:2, HIGH:3, CRITICAL:4};
+  var TIER_RANK = {NO_SIGNAL:0, OBSERVE:1, REVIEW:2, INVESTIGATE:3};
 
   function esc(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
@@ -897,17 +1031,18 @@ _SCRIPT = r"""
   }
 
   function passesFilters(f){
-    var priorityOnly = priorityEl && priorityEl.checked;
-    var anySignal = onlyEl && onlyEl.checked;
-    if (priorityOnly) return (SEV_RANK[f.severity] || 0) >= 3;
-    if (anySignal) return f.count > 0;
-    return true;
+    var selectedMode = queueEls.filter(function(el){ return el.checked; })[0];
+    var mode = selectedMode ? selectedMode.value : 'INVESTIGATE';
+    if (mode === 'INVESTIGATE') return f.tier === 'INVESTIGATE';
+    if (mode === 'REVIEW') return TIER_RANK[f.tier] >= TIER_RANK.REVIEW;
+    if (mode === 'SIGNAL') return f.count > 0;
+    return f.reported;
   }
 
   function renderList(){
     var q = qEl.value.trim().toLowerCase().replace(/[.\-\/]/g,'');
-    var filtered = priorityEl && priorityEl.checked;
-    var anySignal = onlyEl && onlyEl.checked;
+    var selectedMode = queueEls.filter(function(el){ return el.checked; })[0];
+    var mode = selectedMode ? selectedMode.value : 'INVESTIGATE';
     var rows = D.funds.filter(function(f){
       return matches(f, q) && passesFilters(f);
     });
@@ -921,7 +1056,7 @@ _SCRIPT = r"""
 
     countEl.textContent = (capped ? 'showing ' + CAP + ' of ' + total : total) +
       (total === 1 ? ' fund' : ' funds') +
-      (q || filtered || anySignal ? ' matching' : '');
+      (q || mode !== 'ALL' ? ' matching' : '');
 
     if (!total){
       listEl.innerHTML = '<li class="no-hits"><p class="empty" style="padding:14px 20px">' +
@@ -940,7 +1075,7 @@ _SCRIPT = r"""
           (f.name ? '<span class="fund-name">' + esc(f.name) + '</span>' : '') +
         '</span>' +
         '<span class="hit-count">' + (f.count
-            ? '<strong>' + f.count + '</strong>/' + testKeys.length
+            ? '<strong>' + f.count + '</strong> signals · ' + f.familyCount + ' families'
             : '&mdash;') + '</span>' +
         '</button></li>';
     }).join('');
@@ -969,7 +1104,7 @@ _SCRIPT = r"""
           esc(label(key)) + '</span><span class="chip LOW">signal</span></div></li>';
       }
       return '<li class="test is-clean"><div class="test-name"><span>' + esc(label(key)) +
-        '</span><span class="chip clean">clean</span></div></li>';
+        '</span><span class="chip clean">no signal</span></div></li>';
     });
 
     var unrunCards = unrun.map(function(a){
@@ -982,10 +1117,14 @@ _SCRIPT = r"""
       '<div class="detail-head">' +
         '<h2>' + esc(f.name || 'Fund ' + f.display) + '</h2>' +
         '<p class="cnpj">' + esc(f.display) + '</p>' +
+        '<p class="entity-note">Lead tier: <strong>' + esc(label(f.tier)) +
+          '</strong> · ' + f.familyCount + ' independent evidence ' +
+          (f.familyCount === 1 ? 'family' : 'families') +
+          (f.reported ? '' : ' · not present in this month’s informe') + '</p>' +
         (f.count
-          ? '<span class="verdict flagged">' + f.count + ' of ' + testKeys.length +
-            ' detectors raised a signal — review, do not treat as proof</span>'
-          : '<span class="verdict clear">No detector raised a signal for this fund</span>') +
+          ? '<span class="summary-badge signal">' + f.count +
+            ' signals — review, do not treat as proof</span>'
+          : '<span class="summary-badge clear">No signal on the checks that ran</span>') +
       '</div>' +
       '<ul class="matrix">' + cards.join('') + '</ul>' +
       (unrunCards.length
@@ -1000,25 +1139,28 @@ _SCRIPT = r"""
         : '');
 
     renderList();
+    history.replaceState(null, '', '#fund=' + encodeURIComponent(f.cnpj));
+    if (window.matchMedia('(max-width:860px)').matches){
+      detailEl.scrollIntoView({behavior:'smooth', block:'start'});
+    }
   }
 
   listEl.addEventListener('click', function(e){
     var btn = e.target.closest('.fund-btn');
     if (btn) renderDetail(btn.getAttribute('data-cnpj'));
   });
-  qEl.addEventListener('input', renderList);
-  if (onlyEl) onlyEl.addEventListener('change', function(){
-    if (onlyEl.checked && priorityEl) priorityEl.checked = false;
-    renderList();
+  var searchTimer = null;
+  qEl.addEventListener('input', function(){
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderList, 180);
   });
-  if (priorityEl) priorityEl.addEventListener('change', function(){
-    if (priorityEl.checked && onlyEl) onlyEl.checked = false;
-    renderList();
-  });
+  queueEls.forEach(function(el){ el.addEventListener('change', renderList); });
 
   renderList();
   if (D.funds.length){
-    var first = D.funds.filter(function(f){ return (SEV_RANK[f.severity] || 0) >= 3; })[0]
+    var requested = decodeURIComponent((location.hash.match(/#fund=([^&]+)/) || [])[1] || '');
+    var first = D.funds.find(function(f){ return f.cnpj === requested; })
+      || D.funds.find(function(f){ return f.tier === 'INVESTIGATE'; })
       || D.funds[0];
     if (first && first.count) renderDetail(first.cnpj);
   }

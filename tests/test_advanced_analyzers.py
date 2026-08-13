@@ -133,6 +133,21 @@ class TestEnhancedPhantomDetector:
         assert result["type"] == "ETF"
         assert result["should_be_public"] is True
 
+    def test_classify_fund_cnpj_before_ticker_suffix(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        result = detector.classify_asset_type("54.410.358/0001-11")
+        assert result["type"] == "FUND"
+        assert result["validation_method"] == "CVM_REGISTRY"
+
+    def test_registry_miss_is_unverified_not_phantom(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        result = detector.enhanced_validate_asset("FAKE4")
+        assert result["status"] == "NEEDS_VERIFICATION"
+        assert result["fraud_risk"] == "LOW"
+        assert result["is_valid"] is None
+
     def test_classify_bdr(self):
         from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
         detector = EnhancedPhantomAssetDetector()
@@ -325,6 +340,21 @@ class TestPeerComparisonAnalyzer:
         target_funds = informe_df["CNPJ_FUNDO"].unique()[:5].tolist()
         comparison = analyzer.compare_with_peers(target_funds, metrics)
         assert isinstance(comparison, pd.DataFrame)
+
+    def test_compare_with_peers_emits_only_actual_outliers(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["target", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["MULTI"] * 7,
+            "avg_return": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+            "volatility": [1.0] * 7,
+            "sharpe_ratio": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+        })
+        result = analyzer.compare_with_peers(["target", "p1"], metrics)
+        assert result["CNPJ_FUNDO"].tolist() == ["target"]
+        assert result.iloc[0]["is_outlier"] == True  # noqa: E712
+        assert result.iloc[0]["anomaly_type"] == "RETURNS_TOO_HIGH"
 
     def test_detect_smoothed_returns(self):
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer

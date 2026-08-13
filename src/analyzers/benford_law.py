@@ -47,6 +47,7 @@ class BenfordLawAnalyzer:
         8: 0.051,  # 5.1%
         9: 0.046   # 4.6%
     }
+    MIN_SAMPLE_SIZE = 30
 
     def __init__(self, alpha: float = 0.05):
         """
@@ -218,6 +219,22 @@ class BenfordLawAnalyzer:
                 'series_name': series_name,
                 'sample_size': 0,
                 'error': 'No valid values to analyze'
+            }
+
+        if sample_size < self.MIN_SAMPLE_SIZE:
+            return {
+                'series_name': series_name,
+                'sample_size': sample_size,
+                'chi_square': 0.0,
+                'p_value': 1.0,
+                'is_significant': False,
+                'mad': None,
+                'conformity': 'INSUFFICIENT_SAMPLE',
+                'fraud_risk': 'UNKNOWN',
+                'reason': (
+                    f'Benford analysis requires at least {self.MIN_SAMPLE_SIZE} '
+                    'valid observations'
+                ),
             }
 
         # Calculate observed distribution

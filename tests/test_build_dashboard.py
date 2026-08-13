@@ -274,6 +274,33 @@ class TestLeadsFraming:
     def test_page_states_leads_are_not_verdicts(self, run_dir):
         page = render(load_run(run_dir))
         assert "Leads, not verdicts" in page
-        assert "Priority only" in page
-        assert "Priority review" in page
-        assert "With any signal" in page
+        assert "Investigate" in page
+        assert "Review+" in page
+        assert "All reporting funds" in page
+        assert "no signal" in page
+
+    def test_two_strong_evidence_families_create_investigate_tier(self, run_dir):
+        (run_dir / "findings" / "reconciliation_gaps.csv").write_text(
+            f"CNPJ_FUNDO,gap_pct,severity\n{FUND_A},55,CRITICAL\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["tier"] == "INVESTIGATE"
+        assert fund["family_count"] == 2
+
+    def test_full_universe_includes_reporting_funds_without_findings(self, run_dir):
+        informe = run_dir / "informe.csv"
+        informe.write_text(
+            "CNPJ_FUNDO;DT_COMPTC\n"
+            f"{FUND_A};2026-06-01\n"
+            "99888777000166;2026-06-01\n"
+        )
+        summary = json.loads((run_dir / "summary.json").read_text())
+        summary["args"] = {"informe": str(informe)}
+        summary["scope"]["selected_cnpjs"] = []
+        (run_dir / "summary.json").write_text(json.dumps(summary))
+
+        data = load_run(run_dir)
+        by_cnpj = {fund["cnpj"]: fund for fund in data["funds"]}
+        assert data["reporting_funds"] == 2
+        assert by_cnpj["99888777000166"]["tier"] == "NO_SIGNAL"
+        assert by_cnpj["99888777000166"]["reported"] is True

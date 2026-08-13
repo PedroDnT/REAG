@@ -7,6 +7,7 @@ indicando possível manipulação ou fraude.
 
 import logging
 
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from config.constants import (
@@ -162,94 +163,91 @@ class PeerComparisonAnalyzer:
         """
         logger.info(f"Comparando {len(target_funds)} fundos com peers...")
 
-        comparisons = []
+        if all_metrics_df.empty or not target_funds:
+            return pd.DataFrame()
 
-        for cnpj in target_funds:
-            if cnpj not in all_metrics_df['CNPJ_FUNDO'].values:
-                logger.warning(f"Fundo {cnpj} nao encontrado nas metricas")
-                continue
+        metrics = all_metrics_df.drop_duplicates("CNPJ_FUNDO").copy()
+        target_set = set(target_funds)
+        targets = metrics[metrics["CNPJ_FUNDO"].isin(target_set)].copy()
+        if targets.empty:
+            logger.info("Nenhum fundo alvo encontrado nas metricas")
+            return pd.DataFrame()
 
-            # Métricas do fundo alvo
-            fund_metrics = all_metrics_df[all_metrics_df['CNPJ_FUNDO'] == cnpj].iloc[0]
-            category = fund_metrics['category']
-
-            # Peers (mesma categoria, excluindo o próprio fundo)
-            peers = all_metrics_df[
-                (all_metrics_df['category'] == category) &
-                (all_metrics_df['CNPJ_FUNDO'] != cnpj)
-            ]
-
-            if len(peers) < 5:
-                logger.warning(f"Poucos peers para {cnpj} (categoria: {category})")
-                continue
-
-            # Calcular Z-scores vs peers
-            return_zscore = self._calculate_zscore(
-                fund_metrics['avg_return'],
-                peers['avg_return']
+        value_columns = ("avg_return", "volatility", "sharpe_ratio")
+        grouped = metrics.groupby("category", dropna=False)
+        stats = grouped[list(value_columns)].agg(["count", "sum"])
+        for column in value_columns:
+            stats[(column, "sum_sq")] = grouped[column].apply(
+                lambda values: float(np.square(values.astype(float)).sum())
             )
+        stats.columns = [f"{column}_{stat}" for column, stat in stats.columns]
+        targets = targets.merge(stats, left_on="category", right_index=True, how="left")
 
-            vol_zscore = self._calculate_zscore(
-                fund_metrics['volatility'],
-                peers['volatility']
-            )
+        # Exact leave-one-out peer means/stds without rebuilding a peer frame
+        # for every target fund. This changes O(targets x funds) to O(funds).
+        for column in value_columns:
+            peer_count = targets[f"{column}_count"] - 1
+            peer_sum = targets[f"{column}_sum"] - targets[column]
+            peer_sum_sq = targets[f"{column}_sum_sq"] - np.square(targets[column])
+            peer_mean = peer_sum / peer_count
+            peer_variance = (
+                peer_sum_sq - np.square(peer_sum) / peer_count
+            ) / (peer_count - 1)
+            peer_std = np.sqrt(peer_variance.clip(lower=0))
 
-            sharpe_zscore = self._calculate_zscore(
-                fund_metrics['sharpe_ratio'],
-                peers['sharpe_ratio']
-            )
+            targets[f"peer_avg_{column}"] = peer_mean
+            targets[f"{column}_zscore"] = (
+                (targets[column] - peer_mean) / peer_std.replace(0, np.nan)
+            ).fillna(0.0)
+            targets[f"{column}_peer_count"] = peer_count
 
-            # Determinar se é outlier (|Z| > ZSCORE_THRESHOLD)
-            is_outlier = (
-                abs(return_zscore) > ZSCORE_THRESHOLD or
-                abs(sharpe_zscore) > ZSCORE_THRESHOLD
-            )
-
-            # Classificar tipo de anomalia
-            fraud_flag = None
-            if return_zscore > ZSCORE_THRESHOLD:
-                fraud_flag = 'RETURNS_TOO_HIGH'
-            elif return_zscore < -ZSCORE_THRESHOLD:
-                fraud_flag = 'HIDDEN_LOSSES'
-            elif sharpe_zscore > ZSCORE_THRESHOLD:
-                fraud_flag = 'RISK_ADJUSTED_TOO_GOOD'
-
-            comparisons.append({
-                'CNPJ_FUNDO': cnpj,
-                'category': category,
-                'num_peers': len(peers),
-
-                # Métricas do fundo
-                'fund_return': fund_metrics['avg_return'],
-                'fund_volatility': fund_metrics['volatility'],
-                'fund_sharpe': fund_metrics['sharpe_ratio'],
-
-                # Métricas dos peers
-                'peer_avg_return': peers['avg_return'].mean(),
-                'peer_avg_volatility': peers['volatility'].mean(),
-                'peer_avg_sharpe': peers['sharpe_ratio'].mean(),
-
-                # Z-scores
-                'return_zscore': return_zscore,
-                'volatility_zscore': vol_zscore,
-                'sharpe_zscore': sharpe_zscore,
-
-                # Flags
-                'is_outlier': is_outlier,
-                'fraud_flag': fraud_flag
-            })
-
-        result_df = pd.DataFrame(comparisons)
-
-        if not result_df.empty:
-            result_df = result_df.sort_values('return_zscore', ascending=False)
-            logger.info(f"Comparacao concluida: {len(result_df)} fundos analisados")
-            logger.warning(f"Outliers detectados: {result_df['is_outlier'].sum()}")
-        else:
-            logger.info(f"Comparacao concluida: {len(result_df)} fundos analisados")
+        targets = targets[targets["avg_return_peer_count"] >= 5].copy()
+        if targets.empty:
             logger.info("Nenhum fundo com peers suficientes para comparacao")
+            return pd.DataFrame()
 
-        return result_df
+        targets["is_outlier"] = (
+            targets["avg_return_zscore"].abs() > ZSCORE_THRESHOLD
+        ) | (targets["sharpe_ratio_zscore"].abs() > ZSCORE_THRESHOLD)
+        outliers = targets[targets["is_outlier"]].copy()
+        if outliers.empty:
+            logger.info("Comparacao concluida: nenhum outlier detectado")
+            return pd.DataFrame()
+
+        conditions = [
+            outliers["avg_return_zscore"] > ZSCORE_THRESHOLD,
+            outliers["avg_return_zscore"] < -ZSCORE_THRESHOLD,
+            outliers["sharpe_ratio_zscore"] > ZSCORE_THRESHOLD,
+        ]
+        outliers["anomaly_type"] = np.select(
+            conditions,
+            ["RETURNS_TOO_HIGH", "HIDDEN_LOSSES", "RISK_ADJUSTED_TOO_GOOD"],
+            default="UNUSUAL_PEER_PROFILE",
+        )
+
+        result_df = pd.DataFrame({
+            "CNPJ_FUNDO": outliers["CNPJ_FUNDO"],
+            "category": outliers["category"],
+            "num_peers": outliers["avg_return_peer_count"].astype(int),
+            "fund_return": outliers["avg_return"],
+            "fund_volatility": outliers["volatility"],
+            "fund_sharpe": outliers["sharpe_ratio"],
+            "peer_avg_return": outliers["peer_avg_avg_return"],
+            "peer_avg_volatility": outliers["peer_avg_volatility"],
+            "peer_avg_sharpe": outliers["peer_avg_sharpe_ratio"],
+            "return_zscore": outliers["avg_return_zscore"],
+            "volatility_zscore": outliers["volatility_zscore"],
+            "sharpe_zscore": outliers["sharpe_ratio_zscore"],
+            "is_outlier": True,
+            "anomaly_type": outliers["anomaly_type"],
+        }).sort_values("return_zscore", ascending=False)
+
+        logger.info(
+            "Comparacao concluida: %d fundos analisados, %d outliers",
+            len(targets),
+            len(result_df),
+        )
+        return result_df.reset_index(drop=True)
 
     def _calculate_zscore(self, value: float, peer_values: pd.Series) -> float:
         """
