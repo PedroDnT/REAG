@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-REAG is a Python-based financial fraud detection toolkit for analyzing Brazilian investment fund data from CVM (Comissão de Valores Mobiliários). It implements anomaly detection, Benford's Law analysis, and fraud pattern recognition based on real-world cases such as the Banco Master scheme.
+REAG is a Python-based financial fraud detection toolkit for analyzing Brazilian investment fund data from CVM (Comissão de Valores Mobiliários). It implements anomaly detection, Benford's Law analysis, and fraud pattern recognition based on documented Brazilian fund-industry cases.
 
 ---
 

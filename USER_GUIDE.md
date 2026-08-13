@@ -54,7 +54,7 @@ This will:
 The REAG Fraud Investigation Toolkit analyzes Brazilian investment funds to detect:
 
 1. **Phantom Assets** - Assets that don't exist or are overvalued
-2. **Circular Flow** - Money cycling between related entities (Banco Master pattern)
+2. **Circular Flow** - Money cycling between related entities (circular-flow pattern)
 3. **Ponzi Schemes** - Unrealistic, smoothed returns
 4. **Regulatory Violations** - Excessive concentration, compliance issues
 5. **Market Manipulation** - Price discrepancies vs real market data
@@ -72,7 +72,7 @@ REAG Toolkit
 │
 └── Fraud Detection (src/analyzers/)
     ├── Enhanced Phantom Assets
-    ├── Fraud Schemes (Banco Master patterns)
+    ├── Fraud Schemes (circular-flow patterns)
     ├── Peer Comparison
     ├── Concentration Analysis
     └── Market Data Validation
@@ -203,12 +203,12 @@ DEB_SHELL_2024 DEBENTURE   NEEDS_MANUAL_RE... HIGH        50000000.00
 
 ### Analysis 2: Fraud Schemes Detection
 
-**Purpose:** Detect specific patterns from Banco Master fraud case
+**Purpose:** Detect specific patterns from documented Brazilian fraud cases
 
 ```python
 from src.analyzers.fraud_schemes import FraudSchemeDetector
 
-print("\n🚨 FRAUD SCHEMES DETECTION (Banco Master Patterns)")
+print("\n🚨 FRAUD SCHEMES DETECTION (Circular-Flow Patterns)")
 print("-"*70)
 
 scheme_detector = FraudSchemeDetector()
@@ -461,7 +461,7 @@ plt.savefig(output_dir / 'trends.png')
 | Pattern | Severity | Action Required |
 |---------|----------|----------------|
 | 10+ Phantom Assets | 🔴 CRITICAL | Immediate investigation, notify CVM |
-| 5+ Circular Flow Cases | 🔴 CRITICAL | Banco Master-style fraud, freeze assets |
+| 5+ Circular Flow Cases | 🔴 CRITICAL | Circular-flow fraud, freeze assets |
 | Z-score > 5 (returns) | 🔴 CRITICAL | Likely Ponzi, stop redemptions |
 | 3+ Shell Networks | 🟠 HIGH | Investigate issuer legitimacy |
 | HHI > 0.5 + Phantom Assets | 🟠 HIGH | Concentrated fraud risk |
@@ -471,7 +471,7 @@ plt.savefig(output_dir / 'trends.png')
 
 ### Red Flag Combinations
 
-**CRITICAL - Banco Master Pattern:**
+**CRITICAL - Circular-Flow Pattern:**
 ```
 ✅ Circular Flow Detected
 ✅ Shell Company Network
@@ -502,11 +502,11 @@ plt.savefig(output_dir / 'trends.png')
 
 ## Case Studies
 
-### Case Study 1: Banco Master / REAG (R$ 11.5 billion fraud)
+### Case Study 1: Circular flow through shell entities (documented Brazilian case, R$ 11.5 bn)
 
 **What happened:**
-- Administrator managed multiple funds (D Mais, Bravo, etc.)
-- Circular flow: Banco Master → Shells → REAG Funds → Back to Banco Master
+- A single administrator managed multiple related funds
+- Circular flow: bank → shell companies → affiliated funds → back to the bank
 - 36 shell companies participated
 - Inflated illiquid asset values
 

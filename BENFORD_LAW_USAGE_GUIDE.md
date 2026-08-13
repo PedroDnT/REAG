@@ -188,7 +188,7 @@ result = analyzer.analyze_series(fraudulent_fund_pl, "Suspicious Fund")
 
 **Interpretation:** Strong evidence of number fabrication. Immediate investigation recommended.
 
-### Example 3: Banco Master Pattern
+### Example 3: Related-Fund Cluster Pattern
 
 ```python
 # Analyze multiple related funds

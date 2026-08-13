@@ -164,7 +164,7 @@ LEGACY_REAG_MODE = True  # Default
 
 This mode automatically:
 - Sets `TARGET_FUND_MODE = "administrator"`
-- Searches for REAG, CBSF, Banco Master
+- Searches for the configured legacy investigation terms
 - Uses "REAG" as investigation name
 
 ## Fund Selector API
