@@ -203,6 +203,57 @@ class TestFraudSchemeDetector:
         )
         assert isinstance(result, pd.DataFrame)
 
+    def test_circular_flow_detects_same_admin_fund_holding(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A", "FUND_B", "FUND_C"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1", "ADMIN_2"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_B", "FUND_C"],
+            "CD_ATIVO": ["FUND_A", "FUND_A"],
+            "VL_MERCADO": [100.0, 50.0],
+            "QT_POS": [1.0, 1.0],
+            "DT_COMPTC": ["2024-01-31", "2024-01-31"],
+        })
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        assert len(result) == 1
+        assert result.iloc[0]["fund_as_asset"] == "FUND_A"
+        assert result.iloc[0]["held_by_funds"] == ["FUND_B"]
+        assert result.iloc[0]["total_value"] == 150.0
+
+    def test_circular_flow_scales_without_per_fund_cda_scans(self):
+        """Regression: the old loop filtered the full CDA once per fund."""
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        import time
+
+        n_funds = 2000
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": [f"F{i:04d}" for i in range(n_funds)],
+            "CNPJ_ADMIN": [f"A{i // 20:03d}" for i in range(n_funds)],
+        })
+        # Mostly non-fund assets; a handful of same-admin fund holdings.
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": [f"F{i:04d}" for i in range(n_funds)] * 5,
+            "CD_ATIVO": [f"ASSET{i % 50}" for i in range(n_funds * 5)],
+            "VL_MERCADO": [1.0] * (n_funds * 5),
+            "QT_POS": [1.0] * (n_funds * 5),
+            "DT_COMPTC": ["2024-01-31"] * (n_funds * 5),
+        })
+        cda.loc[0, "CD_ATIVO"] = "F0001"
+        cda.loc[0, "CNPJ_FUNDO"] = "F0000"
+
+        started = time.perf_counter()
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        elapsed = time.perf_counter() - started
+        assert elapsed < 2.0
+        assert len(result) == 1
+
     def test_layered_funds_returns_dataframe(self):
         from src.analyzers.fraud_schemes import FraudSchemeDetector
         detector = FraudSchemeDetector()
