@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fund screening — mgr_arx</title>
+<style>*,*::before,*::after{box-sizing:border-box}
+:root{
+--ground:#f7f8fa; --panel:#ffffff; --sunken:#eef0f4;
+--ink:#10141c; --ink-soft:#4a5364; --ink-faint:#78829a;
+--line:#dde1e9; --line-soft:#e6e9f0;
+--accent:#2d4a7c; --accent-soft:#e8edf6;
+--critical:#a8323f; --high:#b8503a; --medium:#9a6b1f; --low:#5b6472;
+--clean:#2f6b4f; --clean-soft:#eaf2ee;
+--unrun:#8b93a5;
+--shadow:0 1px 2px rgba(16,20,28,.06),0 8px 24px -12px rgba(16,20,28,.18);
+}
+@media (prefers-color-scheme:dark){
+:root:not([data-theme="light"]){
+--ground:#0e1116; --panel:#161b22; --sunken:#1c222c;
+--ink:#e9edf4; --ink-soft:#a3adbf; --ink-faint:#6f7a8d;
+--line:#262d38; --line-soft:#1f2530;
+--accent:#7ea3d8; --accent-soft:#1a2434;
+--critical:#e8737f; --high:#e08a68; --medium:#d7a94e; --low:#8a94a6;
+--clean:#6dbd94; --clean-soft:#16241d;
+--unrun:#6b7484;
+--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+}
+}
+:root[data-theme="dark"]{
+--ground:#0e1116; --panel:#161b22; --sunken:#1c222c;
+--ink:#e9edf4; --ink-soft:#a3adbf; --ink-faint:#6f7a8d;
+--line:#262d38; --line-soft:#1f2530;
+--accent:#7ea3d8; --accent-soft:#1a2434;
+--critical:#e8737f; --high:#e08a68; --medium:#d7a94e; --low:#8a94a6;
+--clean:#6dbd94; --clean-soft:#16241d;
+--unrun:#6b7484;
+--shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+}
+body{
+margin:0; background:var(--ground); color:var(--ink);
+font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+-webkit-font-smoothing:antialiased;
+}
+code,.mono,.cnpj,.metric{
+font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+font-variant-numeric:tabular-nums;
+}
+.masthead{
+display:flex; flex-wrap:wrap; gap:24px; align-items:flex-end;
+justify-content:space-between;
+padding:26px clamp(16px,4vw,36px) 20px;
+border-bottom:1px solid var(--line);
+}
+.masthead h1{
+margin:0; font-size:1.35rem; font-weight:620; letter-spacing:-.01em;
+text-wrap:balance;
+}
+.run{margin:5px 0 0; color:var(--ink-soft); font-size:.86rem}
+.run.subtle{color:var(--ink-faint); font-size:.78rem}
+.run strong{font-weight:600; color:var(--ink)}
+.no-period{color:var(--medium)}
+.derived{color:var(--ink-faint); font-weight:400}
+.run code{font-size:.82rem; color:var(--ink-soft)}
+.tallies{display:flex; gap:28px; margin:0}
+.tallies div{display:flex; flex-direction:column; gap:2px}
+.tallies dt{
+font-size:.66rem; letter-spacing:.09em; text-transform:uppercase;
+color:var(--ink-faint);
+}
+.tallies dd{
+margin:0; font-size:1.5rem; font-weight:600;
+font-variant-numeric:tabular-nums;
+}
+.coverage{
+margin:0; padding:11px clamp(16px,4vw,36px);
+font-size:.85rem; border-bottom:1px solid var(--line);
+}
+.coverage.ok{color:var(--clean); background:var(--clean-soft)}
+.coverage.warn{color:var(--medium); background:var(--sunken)}
+.coverage code{font-size:.82em}
+.split{
+display:grid; grid-template-columns:minmax(300px,400px) 1fr;
+align-items:start; min-height:60vh;
+}
+@media (max-width:860px){ .split{grid-template-columns:1fr} }
+.list-pane{border-right:1px solid var(--line); min-width:0}
+@media (max-width:860px){ .list-pane{border-right:none; border-bottom:1px solid var(--line)} }
+.searchbar{
+display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+padding:16px clamp(14px,3vw,20px) 8px;
+}
+#q{
+flex:1 1 180px; min-width:0;
+padding:9px 12px; border:1px solid var(--line); border-radius:7px;
+background:var(--panel); color:var(--ink); font:inherit; font-size:.9rem;
+}
+#q:focus-visible{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent}
+.only-flagged{
+display:flex; align-items:center; gap:6px;
+font-size:.79rem; color:var(--ink-soft); white-space:nowrap; cursor:pointer;
+}
+.result-count{
+margin:0; padding:0 clamp(14px,3vw,20px) 10px;
+font-size:.73rem; letter-spacing:.05em; text-transform:uppercase;
+color:var(--ink-faint);
+}
+.funds{
+list-style:none; margin:0; padding:0 0 20px;
+max-height:66vh; overflow-y:auto;
+}
+.funds li{border-top:1px solid var(--line-soft)}
+.fund-btn{
+display:grid; grid-template-columns:3px 1fr auto; gap:12px; align-items:center;
+width:100%; padding:10px clamp(14px,3vw,20px);
+background:none; border:0; text-align:left; cursor:pointer;
+color:inherit; font:inherit;
+}
+.fund-btn:hover{background:var(--sunken)}
+.fund-btn:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+.fund-btn[aria-current="true"]{background:var(--accent-soft)}
+.stripe{align-self:stretch; border-radius:2px; background:var(--line)}
+.stripe.CRITICAL{background:var(--critical)} .stripe.HIGH{background:var(--high)}
+.stripe.MEDIUM{background:var(--medium)}  .stripe.LOW{background:var(--low)}
+.fund-id{min-width:0}
+.cnpj{font-size:.83rem; display:block}
+.fund-name{
+display:block; font-size:.75rem; color:var(--ink-faint);
+overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.hit-count{
+font-size:.74rem; font-variant-numeric:tabular-nums; color:var(--ink-faint);
+white-space:nowrap;
+}
+.hit-count strong{color:var(--ink); font-weight:600}
+.detail-pane{padding:18px clamp(16px,4vw,32px) 40px; min-width:0}
+.empty{color:var(--ink-faint); font-size:.9rem; padding-top:28px}
+.detail-head h2{margin:0; font-size:1.05rem; font-weight:600}
+.detail-head .cnpj{margin-top:3px; color:var(--ink-soft); font-size:.85rem}
+.verdict{
+display:inline-block; margin:12px 0 4px; padding:3px 10px; border-radius:999px;
+font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; font-weight:600;
+}
+.verdict.flagged{background:var(--critical); color:#fff}
+.verdict.clear{background:var(--clean-soft); color:var(--clean); border:1px solid currentColor}
+.matrix{
+display:grid; gap:8px; margin:16px 0 0; padding:0; list-style:none;
+grid-template-columns:repeat(auto-fill,minmax(232px,1fr));
+}
+.test{
+border:1px solid var(--line); border-radius:8px; padding:9px 11px;
+background:var(--panel); box-shadow:var(--shadow); min-width:0;
+}
+.test.is-clean{box-shadow:none; background:transparent}
+.test.is-unrun{
+box-shadow:none; background:transparent;
+border-style:dashed; border-color:var(--unrun);
+}
+.test-name{
+display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+font-size:.82rem; font-weight:550;
+}
+.test.is-clean .test-name,.test.is-unrun .test-name{font-weight:450; color:var(--ink-soft)}
+.chip{
+font-size:.63rem; letter-spacing:.07em; text-transform:uppercase;
+font-weight:700; white-space:nowrap;
+}
+.chip.CRITICAL{color:var(--critical)} .chip.HIGH{color:var(--high)}
+.chip.MEDIUM{color:var(--medium)}   .chip.LOW{color:var(--low)}
+.chip.clean{color:var(--clean)}     .chip.unrun{color:var(--unrun)}
+.metric{
+margin:5px 0 0; font-size:.76rem; color:var(--ink-soft);
+overflow-wrap:anywhere;
+}
+.unrun-why{margin:5px 0 0; font-size:.72rem; color:var(--unrun); font-style:italic}
+.explain{margin:7px 0 0}
+.explain summary{
+cursor:pointer; font-size:.71rem; color:var(--accent);
+letter-spacing:.03em; list-style:none;
+}
+.explain summary::-webkit-details-marker{display:none}
+.explain summary::before{content:"▸ "; font-size:.85em}
+.explain[open] summary::before{content:"▾ "}
+.explain summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+.explain-body{
+margin-top:7px; padding-left:9px; border-left:2px solid var(--line);
+font-size:.76rem; color:var(--ink-soft);
+}
+.explain-body p{margin:0 0 6px}
+.explain-body .lbl{
+display:block; font-size:.63rem; letter-spacing:.08em; text-transform:uppercase;
+color:var(--ink-faint); margin:8px 0 3px;
+}
+.explain-body ul{margin:0; padding-left:16px}
+.explain-body li{margin:0 0 3px}
+.truncation{
+margin:10px clamp(14px,3vw,20px); padding:8px 11px; border-radius:7px;
+background:var(--sunken); color:var(--ink-soft); font-size:.76rem;
+}
+.section-label{
+margin:26px 0 0; font-size:.68rem; letter-spacing:.09em;
+text-transform:uppercase; color:var(--ink-faint);
+}
+.entity-note{margin:6px 0 0; font-size:.8rem; color:var(--ink-soft)}
+footer{
+padding:20px clamp(16px,4vw,36px) 32px; border-top:1px solid var(--line);
+color:var(--ink-faint); font-size:.79rem; max-width:78ch;
+}
+footer p{margin:0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-id">
+    <h1>Fund screening</h1>
+    <p class="run"><strong>Filings from 2026-06-01 to 2026-06-30</strong> · 22 reporting days <span class="derived">(derived from the source file)</span></p>
+    <p class="run subtle">run <code>mgr_arx</code> · manager · ARX INVESTIMENTOS · analysed 2026-08-10 23:56:27</p>
+  </div>
+  <dl class="tallies">
+    <div><dt>Funds in scope</dt><dd>94</dd></div>
+    <div><dt>Detectors run</dt><dd>19</dd></div>
+    <div><dt>Flagged</dt><dd>90</dd></div>
+  </dl>
+</header>
+
+<p class="coverage warn">Incomplete coverage — 1 skipped for missing inputs: <code>market_data</code>. Those detectors report nothing either way; absence of a flag from them is not a clean result.</p>
+
+<main class="split">
+  <section class="list-pane" aria-label="Funds">
+    <div class="searchbar">
+      <input id="q" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search by CNPJ or fund name" aria-label="Search funds">
+      <label class="only-flagged">
+        <input type="checkbox" id="only"> Flagged only
+      </label>
+    </div>
+    <p class="result-count" id="count" role="status"></p>
+    <ol class="funds" id="funds"></ol>
+  </section>
+
+  <section class="detail-pane" id="detail" aria-live="polite">
+    <div class="empty">
+      <p>Select a fund to see what each detector reported.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>Statistical red flags are leads, not proof. Every finding needs corroboration
+     against records this toolkit cannot see — subscription ledgers, transfers,
+     counterparty documentation.</p>
+</footer>
+
+<script id="data" type="application/json">{"run_id":"mgr_arx","generated_at":"2026-08-10T23:56:27","period":{"start":"2026-06-01","end":"2026-06-30","reporting_days":22,"derived":true},"explanations":{"benford_violations":{"title":"Reported figures deviate from Benford's Law","what":"Leading digits in this fund's reported figures do not follow the logarithmic distribution that naturally-occurring financial data obeys. People inventing numbers tend to spread first digits evenly, while genuine values start with 1 about 30% of the time and with 9 about 5%. A deviation is a hint that some series may be constructed rather than measured.","caveats":["Benford applies to values spanning several orders of magnitude. Series that are bounded, capped, or heavily rounded deviate for entirely innocent reasons -- quota values clustered near 1.0 are a common false positive.","A small sample deviates by chance; treat a low sample_size result as inconclusive.","Deviation indicates the data is unusual, not that it was fabricated."],"next_steps":["Identify which series deviates and reconcile it against the fund's own accounting records.","Check whether the deviation coincides with a change of administrator, auditor or valuation agent.","Re-test over a longer window: short samples deviate by chance."]},"concentration_spikes":{"title":"Portfolio concentration beyond regulatory limits","what":"A small number of positions account for an outsized share of this fund's portfolio, exceeding the diversification limits its category is subject to. Concentration is not fraud in itself, but it is how a fund becomes exposed to a single issuer's failure, and it is a precondition for a mismarked position to move the fund's whole NAV.","caveats":["Some categories are permitted or designed to concentrate -- FIPs, single-asset and exclusive funds among them -- so exceeding a generic limit may be entirely consistent with the mandate.","Month-end snapshots can catch a portfolio mid-rebalance."],"next_steps":["Check the fund's regulation for the diversification limits it committed to.","Establish who issued the dominant position and whether they are related to the administrator or manager.","Request an independent valuation of the largest position."]},"concentration_violations":{"title":"Portfolio concentration beyond regulatory limits","what":"A small number of positions account for an outsized share of this fund's portfolio, exceeding the diversification limits its category is subject to. Concentration is not fraud in itself, but it is how a fund becomes exposed to a single issuer's failure, and it is a precondition for a mismarked position to move the fund's whole NAV.","caveats":["Some categories are permitted or designed to concentrate -- FIPs, single-asset and exclusive funds among them -- so exceeding a generic limit may be entirely consistent with the mandate.","Month-end snapshots can catch a portfolio mid-rebalance."],"next_steps":["Check the fund's regulation for the diversification limits it committed to.","Establish who issued the dominant position and whether they are related to the administrator or manager.","Request an independent valuation of the largest position."]},"cost_basis_anomalies":{"title":"Cost basis vs market value anomaly","what":"We detected positions where the reported market value diverges significantly from cost basis. Zero-cost or negative-cost positions, or extreme unrealized gains on illiquid assets, can indicate phantom assets, data fabrication, or valuation manipulation.","caveats":["Some legitimate positions (e.g., received via corporate actions) may have zero cost basis.","Gain ratios can be extreme for long-held positions in volatile markets."],"next_steps":["Validate the pricing methodology for positions with extreme gain ratios.","Check if zero-cost or negative-cost entries reflect data errors or actual phantom positions.","Compare gain ratios across similar funds to identify systematic overvaluation by a single administrator."]},"cross_fund_price_divergence":{"title":"Declared price diverges from peer funds","what":"Several funds held this same asset on this same date, and this fund declared a unit price materially different from what its peers declared. Funds marking the same instrument on the same day should agree; a fund that does not is either applying a different valuation methodology or mismarking the position -- upward to support its NAV, or downward to defer a loss. This comparison uses only the funds' own CVM filings, with no external price source.","caveats":["Different valuation methodologies can legitimately produce different marks for illiquid assets, particularly around credit events or for instruments with different maturities sharing one asset code.","The consensus is the median of the funds holding the asset; if most holders are related parties, the consensus itself may be mismarked and an honest fund would appear divergent.","Positions acquired at different times may carry different amortized costs under some accounting treatments."],"next_steps":["Request the fund's valuation methodology and pricing source for this asset on this date.","Compare against the peer funds' own methodologies: a defensible difference should be documented.","For unlisted credit, request the independent valuation report and check who prepared it.","Check whether the divergence is systematic across the fund's portfolio or isolated to this asset."]},"flow_anomalies":{"title":"Flow anomaly (z-score outlier)","what":"We detected days where a fund’s net flow was statistically extreme compared to its own history. This can indicate coordinated subscriptions/redemptions, liquidity stress, or unusual investor behavior.","caveats":["Large flows can be legitimate (e.g., institutional reallocations); treat as a lead requiring corroboration."],"next_steps":["Identify the largest subscribers/redeemers for the flagged dates (distributor/investor level).","Confirm whether flows match public disclosures and internal transaction logs (avoid reporting mismatches).","Check if flows coincide with portfolio changes, pricing events, or corporate actions."]},"layered_funds":{"title":"Layered funds (fund-of-funds cascade)","what":"We detected funds investing in other funds within the same administrator group, alongside unusually high recent returns. Layered structures can amplify valuation or reporting problems.","caveats":["Fund-of-funds structures can be legitimate; focus on unexplained return patterns and related-party exposure."],"next_steps":["Identify whether inter-fund investments are permitted and disclosed; review prospectuses/regulations.","Check whether returns are consistent with asset mix and whether pricing sources are independent.","Look for rapid growth in AUM/PL with limited external flows (potential valuation inflation)."]},"lifecycle_anomalies":{"title":"Fund lifecycle anomaly","what":"We detected unusual patterns in fund creation or cancellation. Hot starts (rapid AUM growth), short-lived funds, coordinated creation, or suspicious inflow timing can indicate pump-and-dump schemes or pre-arranged investment structures.","caveats":["Some funds are legitimately created for specific short-term purposes (e.g., structured products).","Hot starts can be normal for funds seeded by institutional investors."],"next_steps":["Check the fund prospectus for pre-arranged subscription commitments.","Identify the initial investors and verify their relationship to the administrator or manager.","For short-lived funds, trace the final disposition of assets and redemption destinations."]},"peer_outliers":{"title":"Risk/return profile far from category peers","what":"This fund's returns, volatility or risk-adjusted performance sit far from other funds in the same category. Returns that are too good, or too smooth, are the signature of a portfolio marked to something other than the market -- the pattern that makes a Ponzi structure look attractive right up until redemptions arrive.","caveats":["Peer groups come from the CVM category label, which is coarse -- a fund may differ legitimately from its nominal peers because it runs a different strategy under the same label.","A genuinely skilled manager is also an outlier; this signal cannot separate skill from mismarking.","Short measurement windows make ordinary funds look extreme."],"next_steps":["Compare the holdings against the peers used for comparison: an unusual profile should have an unusual portfolio behind it.","For suppressed volatility, check whether illiquid positions are being marked at model rather than market.","Ask how the fund achieved its risk-adjusted return and verify the explanation against its holdings."]},"phantom_assets_by_fund":{"title":"Suspicious/phantom asset exposure","what":"We detected assets that appear inconsistent with public registries or have private-asset red flags. Public assets missing from registries are especially concerning; private assets require manual verification.","caveats":["Some private assets are not publicly searchable; treat these as ‘needs verification’ rather than definitive fraud."],"next_steps":["Validate each flagged position with independent documentation (issuance docs, custodian statements).","Confirm pricing sources and whether the asset should be publicly verifiable (stocks/ETFs/BDRs).","Prioritize positions with high value and repeated red flags across multiple funds."]},"pl_drops":{"title":"Abrupt AUM/PL drop","what":"We detected a sharp drop in a fund’s reported assets under management (AUM/PL) over a short period. This can indicate a redemption wave, revaluation event, or reporting correction.","caveats":["PL can change for non-fraud reasons (market moves, large redemptions); confirm with supporting records."],"next_steps":["Validate whether the drop is driven by redemptions, valuation changes, or accounting corrections.","Cross-check pricing sources for key holdings during the window.","Review communications to investors and any exceptional events disclosures."]},"quotaholder_anomalies":{"title":"Quotaholder count anomaly","what":"We detected abnormal changes in the number of quota holders (NR_COTST). Sudden drops can indicate insider knowledge of problems, phantom participation suggests wash trading, and per-capita AUM outliers suggest concentrated ownership.","caveats":["Quotaholder count changes can be legitimate (e.g., fund mergers, institutional reallocations).","NR_COTST is a point-in-time snapshot and may not capture intra-day movements."],"next_steps":["Identify the investors who redeemed during the mass exodus window.","Cross-reference quotaholder changes with flow data to confirm whether drops match redemption volumes.","Check if coordinated exodus across multiple funds under the same admin suggests insider information."]},"reconciliation_gaps":{"title":"Portfolio vs PL reconciliation gap","what":"We detected a significant discrepancy between the sum of portfolio positions (CDA) and the reported net asset value (Informe Diario PL). Gaps can indicate hidden positions, off-book assets, or reporting inconsistencies.","caveats":["CDA and Informe may have different reporting dates; minor gaps can be timing-related.","Derivative positions and cash balances may not be fully reflected in CDA."],"next_steps":["Request the fund's full position report and reconcile against CDA filings.","Check if the gap is explained by derivatives, receivables, or other off-balance items.","Verify whether the administrator filed CDA data on time and completely."]},"runs":{"title":"Redemption run (consecutive negative flows)","what":"We detected consecutive days of net negative flows. Sustained runs can signal investor panic, liquidity mismatch, gating events, or coordinated activity.","caveats":["Runs can be market-driven; look for clustering across related funds or administrators for stronger signals."],"next_steps":["Identify whether the fund used liquidity management tools (gates, side pockets) during the run.","Check if a small number of investors/distributors account for most redemptions.","Compare portfolio liquidity to redemption pressure to assess forced selling risk."]},"shell_networks":{"title":"Shell-like issuer network concentration","what":"We detected multiple issuer names with patterns commonly associated with shell or micro-companies. A dense network of such issuers concentrated under one administrator can be a systemic red flag.","caveats":["Name-based heuristics can over-flag; confirm with corporate registry and issuance documentation."],"next_steps":["Collect issuer registries and verify each issuer’s existence, governance, and economic activity.","Map related-party links between issuers, administrators, and any bank/distributor entities.","Review the due diligence process and valuation methodology for private/illiquid instruments."]},"valuation_smoothing":{"title":"Valuation smoothing detected","what":"We detected statistical patterns consistent with return smoothing or stale pricing. High return autocorrelation, extended periods of zero price change, or suspiciously low volatility can indicate that a fund's NAV is not reflecting true market values.","caveats":["Some asset classes (e.g., real estate, private credit) legitimately have low daily volatility.","Autocorrelation can be caused by illiquid markets rather than deliberate smoothing."],"next_steps":["Request the fund's valuation methodology and pricing sources for illiquid positions.","Check if the fund's returns are consistent with its stated asset class and strategy.","Compare the fund's volatility profile with peer funds holding similar assets."]},"window_dressing":{"title":"Window dressing pattern","what":"We detected temporal manipulation patterns around reporting dates. Month-end return spikes, quarter-end PL inflation, or flow reversal patterns (large inflows before month-end followed by outflows after) suggest deliberate performance or AUM window dressing.","caveats":["Some month-end effects are market-wide (e.g., rebalancing flows) and not fund-specific.","Quarter-end reporting deadlines can cause legitimate timing differences."],"next_steps":["Compare month-end vs mid-month pricing sources for the fund's key holdings.","Check if flow reversals correspond to specific distributors or investor categories.","Verify whether quarter-end PL spikes are explained by legitimate corporate actions or dividends."]}},"scope":{"fund_filter_enabled":true,"selected_funds_count":92,"fund_mode":"manager","fund_identifier":"ARX INVESTIMENTOS"},"tests":[{"key":"asset_inflation","rows":0,"signal":null},{"key":"benford_violations","rows":88,"signal":"benford_violation"},{"key":"concentration_spikes","rows":39,"signal":"concentration_violation"},{"key":"concentration_violations","rows":49,"signal":"concentration_violation"},{"key":"cost_basis_anomalies","rows":0,"signal":"cost_basis_anomaly"},{"key":"cross_fund_price_divergence","rows":6,"signal":"cross_fund_price_divergence"},{"key":"divergences","rows":5,"signal":null},{"key":"flow_anomalies","rows":58,"signal":"flow_anomaly"},{"key":"layered_funds","rows":0,"signal":"layered_funds"},{"key":"lifecycle_anomalies","rows":2,"signal":"fund_lifecycle_anomaly"},{"key":"peer_outliers","rows":88,"signal":"peer_outlier"},{"key":"phantom_assets_by_fund","rows":1181,"signal":"phantom_asset_exposure"},{"key":"pl_drops","rows":0,"signal":"pl_drop"},{"key":"quotaholder_anomalies","rows":6,"signal":"quotaholder_anomaly"},{"key":"reconciliation_gaps","rows":35,"signal":"portfolio_reconciliation_gap"},{"key":"runs","rows":0,"signal":"redemption_run"},{"key":"shell_networks","rows":0,"signal":"shell_network"},{"key":"valuation_smoothing","rows":55,"signal":"valuation_smoothing"},{"key":"window_dressing","rows":1,"signal":"window_dressing"}],"entity_level":["circular_flow","cross_fund_issuer","manager_network_anomalies","phantom_assets"],"skipped":["market_data"],"failed":[],"complete":true,"severities":["","LOW","MEDIUM","HIGH","CRITICAL"],"rows":[["05975117000104","ARX TARGET ICATU PREV FIC DE FI FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.28",1],[3,4,"top1_pct: 99.28",1],[7,0,"Z_SCORE_FLOW: 3.3",1],[10,0,"sharpe_zscore: -0.4526",1],[11,0,"",11],[17,3,"autocorrelation: 0.5261",1]]],["30910199000156","ARX ELBRUS FIC DE FUNDO INCENTIVADO DE INVESTIMENTO FINANCEIRO EM INFRA RENDA FIXA - RESP LTDA",4,[[1,0,"pl_mad: 0.1944",1],[2,0,"PCT_CARTEIRA: 99.59",1],[3,4,"top1_pct: 99.59",1],[7,0,"Z_SCORE_FLOW: -2.684",1],[10,0,"sharpe_zscore: -0.4532",1],[11,4,"total_value_fund: 693822832.4",11],[17,2,"autocorrelation: 0.4623",1]]],["34461874000168","ARX K2 ZURICH INFLAÇÃO CURTA FIC DE FIF MULTIMERCADO CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2007",1],[2,0,"PCT_CARTEIRA: 97.41",1],[3,4,"top1_pct: 97.41",1],[7,0,"Z_SCORE_FLOW: -3.441",1],[10,0,"sharpe_zscore: -0.4556",1],[11,0,"",11],[17,2,"autocorrelation: 0.4286",1]]],["34962302000162","ARX EVEREST MASTER FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2073",1],[5,4,"divergence_pct: 551",1],[6,0,"DIVERGENCE_SCORE: 4.641",1],[7,0,"Z_SCORE_FLOW: -2.738",1],[10,0,"sharpe_zscore: -0.4095",1],[11,0,"",50],[14,4,"gap_pct: 80.2",1]]],["35789436000196","ARX EVEREST ADVISORY FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESP LTDA",4,[[1,0,"pl_mad: 0.1729",1],[2,0,"PCT_CARTEIRA: 99.46",1],[3,4,"top1_pct: 99.46",1],[6,0,"DIVERGENCE_SCORE: 5.379",1],[7,0,"Z_SCORE_FLOW: -3.173",1],[10,0,"sharpe_zscore: -0.4114",1],[11,4,"total_value_fund: 396096795.16",11]]],["37368116000198","ARX ELBRUS PRO FIC DE FUNDOS INCENTIVADOS DE INVEST FINANCEIRO EM INFRA RENDA FIXA - RESP LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.44",1],[3,4,"top1_pct: 99.44",1],[7,0,"Z_SCORE_FLOW: -2.524",1],[10,0,"sharpe_zscore: -0.4567",1],[11,4,"total_value_fund: 153152464.43",11],[17,2,"autocorrelation: 0.457",1]]],["41579363000100","ARX VINSON INSTITUCIONAL FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1729",1],[2,0,"PCT_CARTEIRA: 99.28",1],[3,4,"top1_pct: 99.28",1],[7,0,"Z_SCORE_FLOW: -4.295",1],[10,0,"sharpe_zscore: -0.3889",1],[11,0,"",11],[13,2,"pct_change: -33.33",5]]],["41888219000156","ARX DENALI ADVISORY FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.18",1],[3,4,"top1_pct: 99.18",1],[6,0,"DIVERGENCE_SCORE: 4.582",1],[7,0,"Z_SCORE_FLOW: -3.409",1],[10,0,"sharpe_zscore: -0.3622",1],[11,4,"total_value_fund: 1544375884.95",11]]],["43761768000190","ARX K2 XP SEGUROS II INFLAÇÃO CURTA FIC DE FIF MULTIMERCADO CRÉD PRIV - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 98.6",1],[3,4,"top1_pct: 98.6",1],[7,0,"Z_SCORE_FLOW: -2.963",2],[10,0,"sharpe_zscore: -0.4556",1],[11,4,"total_value_fund: 129267197.42",11],[17,2,"autocorrelation: 0.4286",1]]],["46375144000123","ARX K2 ICATU INFLAÇÃO CURTA FIC DE FIF MULTIMERCADO CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.212",1],[2,0,"PCT_CARTEIRA: 99.39",1],[3,4,"top1_pct: 99.39",1],[7,0,"Z_SCORE_FLOW: 2.701",2],[10,0,"sharpe_zscore: -0.4556",1],[11,0,"",11],[17,2,"autocorrelation: 0.4286",1]]],["46997370000146","ARX K2 IVP PREVIDENCIÁRIO INFLAÇÃO CURTA FIF RENDA FIXA CRÉDITO PRIVADO RESP LIMITADA",4,[[1,0,"pl_mad: 0.212",1],[5,3,"divergence_pct: -52.05",1],[7,0,"Z_SCORE_FLOW: 3.361",1],[10,0,"sharpe_zscore: -0.4558",1],[11,4,"total_value_fund: 1880917.8900000001",39],[14,4,"gap_pct: 48.47",1],[17,2,"autocorrelation: 0.4719",1]]],["52286231000107","ARX FUJI FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESP LTDA",4,[[1,0,"pl_mad: 0.2007",1],[2,0,"PCT_CARTEIRA: 99.2",1],[3,4,"top1_pct: 99.2",1],[6,0,"DIVERGENCE_SCORE: 4.105",1],[10,0,"sharpe_zscore: -0.1198",1],[11,4,"total_value_fund: 9258867001.45",11],[17,3,"",1]]],["52286268000135","ARX FUJI MASTER FUNDO DE INVESTIMENTO FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESP LTDA",4,[[1,0,"pl_mad: 0.2007",1],[6,0,"DIVERGENCE_SCORE: 4.126",1],[10,0,"sharpe_zscore: -0.1139",1],[11,0,"",11],[13,4,"per_capita_aum: 9258866989.61",1],[14,4,"gap_pct: 96.22",1],[17,3,"",1]]],["57726577000100","ARX HEDGE II FIC DE FIF INVESTIMENTO EM INFRAESTRUTURA RENDA FIXA CRÉDITO PRIVADO RESP LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.12",1],[3,4,"top1_pct: 99.12",1],[7,0,"Z_SCORE_FLOW: -2.892",1],[10,0,"sharpe_zscore: -0.4345",1],[11,0,"",11],[17,2,"autocorrelation: 0.3143",1]]],["06041290000106","ARX EXTRA FIC DE FIF MULTIMERCADO - RESP LTDA",4,[[1,0,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 99.67",1],[3,4,"top1_pct: 99.67",1],[10,0,"sharpe_zscore: -0.4533",1],[11,0,"",11],[17,2,"autocorrelation: 0.3086",1]]],["10237480000162","ARX LONG TERM FIC FIF EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.55",1],[3,4,"top1_pct: 99.55",1],[7,0,"Z_SCORE_FLOW: -2.6",1],[10,0,"sharpe_zscore: -0.4524",1],[11,4,"total_value_fund: 16204910.57",2]]],["17414721000140","ARX MACRO FIC DE FIF MULTIMERCADO - RESP LTDA",4,[[1,0,"pl_mad: 0.1944",1],[2,0,"PCT_CARTEIRA: 99.04",1],[3,4,"top1_pct: 99.04",1],[7,0,"Z_SCORE_FLOW: -2.63",1],[10,0,"sharpe_zscore: -0.4534",1],[11,0,"",11]]],["17906107000104","BNY MELLON ARX OVER FIF RENDA FIXA CURTO PRAZO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 91.53",1],[3,4,"top1_pct: 91.53",1],[7,2,"Z_SCORE_FLOW: 3.176",1],[10,0,"sharpe_zscore: 2.553",1],[17,4,"autocorrelation: 0.8956",2]]],["28637847000109","CONATUS FUNDO DE INVESTIMENTO EM COTAS DE FIF MULTIMERCADO - RESP LTDA",4,[[1,0,"pl_mad: 0.2073",1],[2,0,"PCT_CARTEIRA: 99.82",1],[3,4,"top1_pct: 99.82",1],[10,0,"sharpe_zscore: -0.453",1],[11,0,"",11],[17,2,"autocorrelation: 0.3087",1]]],["30910553000142","ARX VINSON FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2073",1],[2,0,"PCT_CARTEIRA: 99.5",1],[3,4,"top1_pct: 99.5",1],[7,0,"Z_SCORE_FLOW: -3.164",1],[10,0,"sharpe_zscore: -0.3885",1],[11,4,"total_value_fund: 617385694.36",11]]],["30921203000181","ARX DENALI FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2007",1],[2,0,"PCT_CARTEIRA: 99.2",1],[3,4,"top1_pct: 99.2",1],[7,0,"Z_SCORE_FLOW: 2.831",1],[10,0,"sharpe_zscore: -0.3625",1],[11,4,"total_value_fund: 450122494.18",11]]],["32102131000176","ARX EVEREST FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 99.46",1],[3,4,"top1_pct: 99.46",1],[7,0,"Z_SCORE_FLOW: -2.583",1],[10,0,"sharpe_zscore: -0.4115",1],[11,4,"total_value_fund: 254778038.91",11]]],["32225663000109","ARX HEDGE FIC DE FUNDO INCENTIVADO DE INVESTIMENTO FINANCEIRO EM INFRA RENDA FIXA - RESP LTDA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 98.89",1],[3,4,"top1_pct: 98.89",1],[10,0,"sharpe_zscore: -0.4357",1],[11,4,"total_value_fund: 1788327052.56",11],[17,2,"autocorrelation: 0.3066",1]]],["32312678000104","ARX DENALI PREVIDÊNCIA FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.212",1],[5,1,"divergence_pct: 14.83",1],[7,0,"Z_SCORE_FLOW: -2.85",1],[10,0,"sharpe_zscore: -0.3723",1],[11,0,"",74],[14,4,"gap_pct: 80.73",1]]],["32319373000116","ARX ELBRUS MASTER II FUNDO INCENTIVADO DE INVESTIMENTO FINANCEIRO EM INFRA RENDA FIXA  - RESP LTDA",4,[[1,0,"pl_mad: 0.1553",1],[3,2,"top1_pct: 35.76",1],[10,0,"sharpe_zscore: -0.453",1],[11,0,"",16],[14,4,"gap_pct: 96.56",1],[17,2,"autocorrelation: 0.4626",1]]],["32319627000104","ARX ELBRUS ADVISORY FIC DE FUNDOS INCENTIVADOS DE INVESTIMENTO FINANCEIRO EM INFRA RF - RESP LTDA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.53",1],[3,4,"top1_pct: 99.53",1],[10,0,"sharpe_zscore: -0.4532",1],[11,4,"total_value_fund: 1238911492.89",11],[17,2,"autocorrelation: 0.4625",1]]],["32770526000147","ARX K2 INFLAÇÃO CURTA FI FINANCEIRO MULTIMERCADO CRÉDITO PRIVADO- RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2047",1],[7,0,"Z_SCORE_FLOW: -3.743",1],[10,0,"sharpe_zscore: -0.4552",1],[11,4,"total_value_fund: 13051675.75",46],[14,4,"gap_pct: 81.13",1],[17,2,"autocorrelation: 0.4286",1]]],["34461754000160","ARX INCOME 100 XP SEGUROS PREVIDÊNCIA FIC DE FI FINANCEIRO EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.05",1],[3,4,"top1_pct: 99.05",1],[7,0,"Z_SCORE_FLOW: 3.562",1],[10,0,"sharpe_zscore: -0.4537",1],[11,0,"",11]]],["34461856000186","ARX DENALI ZURICH PREVIDÊNCIA FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 98.44",1],[3,4,"top1_pct: 98.44",1],[7,0,"Z_SCORE_FLOW: -3.665",1],[10,0,"sharpe_zscore: -0.3759",1],[11,0,"",11]]],["35927261000136","PORTO SEGURO ARX INCOME 70 PREV FIC DE FI FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 63.62",1],[3,4,"top1_pct: 63.62",1],[7,0,"Z_SCORE_FLOW: -3.156",1],[10,0,"sharpe_zscore: -0.4531",1],[11,0,"",12]]],["35927347000169","PORTO SEGURO ARX DENALI PREV FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.31",1],[3,4,"top1_pct: 99.31",1],[7,0,"Z_SCORE_FLOW: 2.625",1],[10,0,"sharpe_zscore: -0.3756",1],[11,4,"total_value_fund: 124586105.37",11]]],["37355672000120","ARX INCOME ICATU PREV 100 FIC DE FI FINANCEIRO EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.27",1],[3,4,"top1_pct: 99.27",1],[7,0,"Z_SCORE_FLOW: 3.599",1],[10,0,"sharpe_zscore: -0.4537",1],[11,4,"total_value_fund: 17249981.96",2]]],["37368078000173","ARX ELBRUS PRO MASTER FUNDO INCENTIVADO DE INVESTIMENTO FINANCEIRO EM INFRA RENDA FIXA - RESP LTDA",4,[[1,0,"pl_mad: 0.1831",1],[7,0,"Z_SCORE_FLOW: -2.511",1],[10,0,"sharpe_zscore: -0.4566",1],[11,0,"",14],[14,4,"gap_pct: 94.15",1],[17,2,"autocorrelation: 0.457",1]]],["38026664000100","ARX VINSON CLEAN FEE FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1944",1],[2,0,"PCT_CARTEIRA: 99.11",1],[3,4,"top1_pct: 99.11",1],[7,0,"Z_SCORE_FLOW: -4.211",1],[10,0,"sharpe_zscore: -0.392",1],[11,0,"",11]]],["39959156000130","ARX ELBRUS PRO ADVISORY I FIC FIF EM INFRAESTRUTURA RENDA FIXA - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.39",1],[3,4,"top1_pct: 99.39",1],[10,0,"sharpe_zscore: -0.4567",1],[11,4,"total_value_fund: 124304488.39",11],[17,2,"autocorrelation: 0.457",1]]],["41888492000180","ARX VINSON ADVISORY FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.45",1],[3,4,"top1_pct: 99.45",1],[7,0,"Z_SCORE_FLOW: -3.74",1],[10,0,"sharpe_zscore: -0.3884",1],[11,4,"total_value_fund: 1194182756.86",11]]],["42767774000192","ARX VINSON A FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 99.45",1],[3,4,"top1_pct: 99.45",1],[7,0,"Z_SCORE_FLOW: -3.478",1],[10,0,"sharpe_zscore: -0.3875",1],[11,4,"total_value_fund: 142614093.5",11]]],["42776215000149","ARX DENALI A FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1944",1],[2,0,"PCT_CARTEIRA: 99.08",1],[3,4,"top1_pct: 99.08",1],[7,0,"Z_SCORE_FLOW: -2.589",1],[10,0,"sharpe_zscore: -0.3613",1],[11,4,"total_value_fund: 328932114.92",11]]],["45604940000128","ARX VINSON S FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2109",1],[2,0,"PCT_CARTEIRA: 99.48",1],[3,4,"top1_pct: 99.48",1],[7,0,"Z_SCORE_FLOW: -4.194",1],[10,0,"sharpe_zscore: -0.3877",1],[11,0,"",11]]],["45605070000101","ARX DENALI P FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2073",1],[2,0,"PCT_CARTEIRA: 97.7",1],[3,4,"top1_pct: 97.7",1],[7,0,"Z_SCORE_FLOW: -4.279",1],[10,0,"sharpe_zscore: -0.3648",1],[11,0,"",11]]],["45605097000102","ARX VINSON P FIC DE FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 99.46",1],[3,4,"top1_pct: 99.46",1],[7,0,"Z_SCORE_FLOW: 2.655",1],[10,0,"sharpe_zscore: -0.3876",1],[11,4,"total_value_fund: 204769288.28",11]]],["45605131000130","ARX DENALI S FIC FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[2,0,"PCT_CARTEIRA: 98.75",1],[3,4,"top1_pct: 98.75",1],[7,0,"Z_SCORE_FLOW: -3.837",1],[10,0,"sharpe_zscore: -0.3614",1],[11,4,"total_value_fund: 284432069.71",11]]],["46099626000106","ARX PREVIDENCIÁRIO S FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[5,2,"divergence_pct: 21",1],[7,0,"Z_SCORE_FLOW: -3.831",1],[10,0,"sharpe_zscore: -0.3605",1],[11,0,"",66],[14,4,"gap_pct: 79.65",1]]],["52067940000100","ARX K2 INFLAÇÃO CURTA MULTISEGURADORA TIPO 2 FIC DE FIF MULTIMERCADO CRÉD PRIV - RESP LTDA",4,[[1,0,"pl_mad: 0.2047",1],[2,0,"PCT_CARTEIRA: 99.38",1],[3,4,"top1_pct: 99.38",1],[10,0,"sharpe_zscore: -0.4557",1],[11,0,"",11],[17,2,"autocorrelation: 0.4285",1]]],["56284312000129","ARX HEDGE II MASTER FIF INVEST EM INFRA RENDA FIXA CRÉDITO PRIVADO RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1485",1],[7,0,"Z_SCORE_FLOW: 2.929",1],[10,0,"sharpe_zscore: -0.4342",1],[11,0,"",14],[14,4,"gap_pct: 96.28",1],[17,2,"autocorrelation: 0.3139",1]]],["58451811000199","ARX BLANC FUNDO DE INVESTIMENTO FINANCEIRO MULTIMERCADO CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[2,0,"PCT_CARTEIRA: 72.03",1],[3,4,"top1_pct: 72.03",1],[7,0,"Z_SCORE_FLOW: 3.382",1],[10,0,"sharpe_zscore: -0.4171",1],[11,0,"",28]]],["58586883000143","ARX ELBRUS III MASTER FIF RENDA FIXA INVESTIMENTO EM INFRAESTRUTURA RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[7,0,"Z_SCORE_FLOW: -3.292",1],[10,0,"sharpe_zscore: -0.4537",1],[11,0,"",12],[14,4,"gap_pct: 97.69",1],[17,2,"autocorrelation: 0.4628",1]]],["60477852000104","ARX IPCA CAIXA FIF EM INFRAESTRUTURA RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[7,0,"Z_SCORE_FLOW: -4.348",1],[10,0,"sharpe_zscore: -0.4536",1],[11,0,"",12],[14,4,"gap_pct: 92.43",1],[17,2,"autocorrelation: 0.4618",1]]],["03168062000103","ARX INCOME FIC DE FUNDO DE INVESTIMENTO FINANCEIRO EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[2,1,"PCT_CARTEIRA: 99.03",1],[3,4,"top1_pct: 99.03",1],[10,0,"sharpe_zscore: -0.4538",1],[11,4,"total_value_fund: 222423839.16",2]]],["03879361000148","ARX INCOME ICATU PREVIDÊNCIA FI FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.2109",1],[7,2,"Z_SCORE_FLOW: 3.174",1],[10,1,"sharpe_zscore: -0.4542",1],[14,3,"gap_pct: 100",1],[18,3,"deviation_pct: 3.34",1]]],["22118342000143","ARX EXTRA MASTER FUNDO DE INVESTIMENTO FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[10,0,"sharpe_zscore: -0.4527",1],[11,0,"",10],[14,4,"gap_pct: 82.56",1],[17,2,"autocorrelation: 0.3087",1]]],["26703040000193","ARX LONG TERM MASTER FUNDO DE INVESTIMENTO FINANCEIRO EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[7,0,"Z_SCORE_FLOW: -2.64",1],[10,0,"sharpe_zscore: -0.4522",1],[11,0,"",10],[14,4,"gap_pct: 98.92",1]]],["31032145000106","ARX TARGET ICATU PREVIDÊNCIA FI FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[7,2,"Z_SCORE_FLOW: 3.326",1],[10,1,"sharpe_zscore: -0.4525",1],[14,2,"gap_pct: 100",1],[17,3,"autocorrelation: 0.5262",1]]],["32075119000110","ARX HEDGE MASTER FIF EM INFRAESTRUTURA RENDA FIXA - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[10,0,"sharpe_zscore: -0.4351",1],[11,0,"",14],[14,4,"gap_pct: 98.04",1],[17,2,"autocorrelation: 0.3067",1]]],["32385410000194","BNY MELLON ARX LIQUIDEZ J FUNDO DE INVESTIMENTO FINANCEIRO RENDA FIXA REFERENCIADO DI RESP LTDA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 36.55",1],[7,2,"Z_SCORE_FLOW: 3.123",2],[10,0,"sharpe_zscore: 2.598",1],[17,4,"autocorrelation: 0.8436",2]]],["33165244000183","ARX K2 PREVIDÊNCIA FUNDO DE INVESTIMENTO EM COTAS DE FUNDO DE INVESTIMENTO FINANCEIRO MULTIMERCADO",4,[[1,4,"pl_mad: 0.1553",1],[7,2,"Z_SCORE_FLOW: -3.937",1],[10,1,"sharpe_zscore: -0.4556",1],[14,3,"gap_pct: 100",1],[17,2,"autocorrelation: 0.4286",1]]],["33701805000111","ARX SULAMÉRICA K2 INFLAÇÃO CURTA PREV FIF DA CLASSE DE INV EM COTAS MULTIMERCADO CRED PRIV RL",4,[[1,4,"pl_mad: 0.1553",1],[7,1,"Z_SCORE_FLOW: -2.547",1],[10,1,"sharpe_zscore: -0.4556",1],[14,3,"gap_pct: 100",1],[17,2,"autocorrelation: 0.4286",1]]],["34461733000145","ARX INCOME PREVIDÊNCIA MASTER FUNDO DE INVESTIMENTO FINANCEIRO EM AÇÕES - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.2047",1],[7,0,"Z_SCORE_FLOW: 3.29",1],[10,0,"sharpe_zscore: -0.4535",1],[11,0,"",10],[14,4,"gap_pct: 93.36",1]]],["34474989000197","ARX DENALI MASTER FIF RENDA FIXA CRÉDITO PRIVADO - RESP LTDA",4,[[1,0,"pl_mad: 0.1831",1],[7,0,"Z_SCORE_FLOW: -2.612",1],[10,0,"sharpe_zscore: -0.36",1],[11,0,"",70],[14,4,"gap_pct: 80.93",1]]],["35927302000194","ARX SOBERANO FUNDO DE INVESTIMENTO FINANCEIRO RENDA FIXA REFERENCIADO DI RESP LTDA",4,[[1,0,"pl_mad: 0.1553",1],[3,2,"top1_pct: 24.28",1],[10,0,"sharpe_zscore: 2.584",1],[11,0,"",10],[17,4,"autocorrelation: 0.8302",2]]],["36352346000104","ARX CREDIT OPPORTUNITIES K FIF MULTIMERCADO CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1448",1],[7,0,"Z_SCORE_FLOW: 3.169",2],[10,0,"sharpe_zscore: -0.4075",1],[11,0,"",53],[14,4,"gap_pct: 76.6",1]]],["41575611000145","ARX PREVIDENCIÁRIO FIF DA CLASSE DE INVESTIMENTO EM COTAS RENDA FIXA CRÉDITO PRIVADO RESP LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[2,1,"PCT_CARTEIRA: 99.48",1],[3,4,"top1_pct: 99.48",1],[10,1,"sharpe_zscore: -0.3807",1],[11,4,"total_value_fund: 1608171965.25",2]]],["46997356000142","ARX K2 IVP PREVIDENCIÁRIO INFLAÇÃO CURTA FIF CIC RENDA FIXA CRÉD PRIV RESP LIMITADA",4,[[1,4,"pl_mad: 0.212",1],[7,2,"Z_SCORE_FLOW: 3.361",1],[10,1,"sharpe_zscore: -0.4561",1],[14,3,"gap_pct: 100",1],[17,2,"autocorrelation: 0.4718",1]]],["58516289000186","ARX BLANC FI FINANCEIRO RENDA FIXA  INVESTIMENTO EM INFRAESTRUTURA - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1216",1],[7,0,"Z_SCORE_FLOW: 3.426",1],[10,0,"sharpe_zscore: -0.4246",1],[11,0,"",10],[14,4,"gap_pct: 95.79",1]]],["63920768000101","ARX INFRA CDI DINÂMICO FUNDO INCENTIVADO DE INVEST FINANCEIRO EM INFRA CREDITO PRIVADO RENDA FIXA RL",4,[[1,0,"pl_mad: 0.1553",1],[3,2,"top1_pct: 36.5",1],[10,0,"sharpe_zscore: -0.4108",1],[11,0,"",13],[14,4,"gap_pct: 97.42",1]]],["17898543000170","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 38.66",1],[10,1,"sharpe_zscore: 2.598",1],[17,4,"autocorrelation: 0.7634",2]]],["18416618000100","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI II - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 22.99",1],[10,1,"sharpe_zscore: 2.32",1],[17,4,"autocorrelation: 0.8627",2]]],["18418825000196","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI VI - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 21.73",1],[10,1,"sharpe_zscore: 2.395",1],[17,4,"autocorrelation: 0.8455",2]]],["18418874000129","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI VIII - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 29.05",1],[10,1,"sharpe_zscore: 2.383",1],[17,4,"autocorrelation: 0.8072",2]]],["18418894000108","BNY MELLON ARX LIQUIDEZ FUNDO DE INVESTIMENTO FINANCEIRO RENDA FIXA REFERENCIADO DI  X - RESP LTDA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 21.18",1],[10,1,"sharpe_zscore: 2.354",1],[17,4,"autocorrelation: 0.8496",2]]],["18428603000154","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI VII - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[3,2,"top1_pct: 29.19",1],[10,1,"sharpe_zscore: 2.406",1],[17,4,"autocorrelation: 0.8301",2]]],["19736757000176","ARX MACRO MASTER FUNDO DE INVESTIMENTO FINANCEIRO MULTIMERCADO - RESP LTDA",4,[[1,0,"pl_mad: 0.1944",1],[10,0,"sharpe_zscore: -0.4528",1],[11,0,"",10],[14,4,"gap_pct: 81.17",1]]],["31120022000119","ARX DENALI ICATU PREVIDÊNCIA FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1944",1],[7,1,"Z_SCORE_FLOW: 2.548",1],[10,1,"sharpe_zscore: -0.378",1],[14,3,"gap_pct: 100",1]]],["31353579000108","ARX DENALI ICATU PREVIDÊNCIA FIC DE FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1944",1],[7,1,"Z_SCORE_FLOW: 2.553",1],[10,1,"sharpe_zscore: -0.3779",1],[14,3,"gap_pct: 100",1]]],["34474470000109","ARX VINSON MASTER FI FINANCEIRO RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[10,0,"sharpe_zscore: -0.3863",1],[11,0,"",71],[14,4,"gap_pct: 78.04",1]]],["35420957000171","ARX INCOME 70 ZURICH PREV FIC DE FI FINANCEIRO MULTIMERCADO - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[7,3,"Z_SCORE_FLOW: 4.022",1],[10,1,"sharpe_zscore: -0.4531",1],[14,2,"gap_pct: 100",1]]],["41575809000129","ARX PREVIDENCIÁRIO FIFE FIF RENDA FIXA CRÉDITO PRIVADO RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1553",1],[5,3,"divergence_pct: -52.05",2],[10,0,"sharpe_zscore: -0.3775",1],[11,4,"total_value_fund: 33474880.89",61]]],["44212092000149","ALPES FIFE FI FINANCEIRO - CI RF CRED PRIV - RESP LIMITADA",4,[[1,4,"pl_mad: 0.212",1],[7,3,"Z_SCORE_FLOW: -4.304",1],[10,1,"sharpe_zscore: -0.3979",1],[14,3,"gap_pct: 100",1]]],["60808027000137","ARX VINSON T MASTER FIF RENDA FIXA CRÉDITO PRIVADO - RESPONSABILIDADE LIMITADA",4,[[1,0,"pl_mad: 0.1831",1],[10,0,"sharpe_zscore: -0.3916",1],[11,0,"",65],[14,4,"gap_pct: 74.09",1]]],["62551626000143","ARX ELBRUS OAWM FUNDO DE INVESTIMENTO FINANCEIRO RENDA FIXA INVESTIMENTO EM  INFRAESTRUTURA",4,[[1,4,"pl_mad: 0.1553",1],[10,1,"sharpe_zscore: -0.4539",1],[14,2,"gap_pct: 100",1],[17,2,"autocorrelation: 0.4677",1]]],["18416553000195","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI III - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[10,1,"sharpe_zscore: 2.502",1],[17,4,"autocorrelation: 0.8141",2]]],["18418812000117","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI IV - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[10,1,"sharpe_zscore: 2.536",1],[17,4,"autocorrelation: 0.8135",2]]],["18418851000114","BNY MELLON ARX LIQUIDEZ FIF EM RENDA FIXA REFERENCIADO DI V - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[10,1,"sharpe_zscore: 2.59",1],[17,4,"autocorrelation: 0.7921",2]]],["18418915000187","BNY MELLON ARX LIQUIDEZ FIF RENDA FIXA REFERENCIADO DI IX - RESPONSABILIDADE LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[10,1,"sharpe_zscore: 2.424",1],[17,4,"autocorrelation: 0.8603",2]]],["28788541000145","FP ARX TOTAL RETURN FIF - CLASSE DE INVESTIMENTO EM AÇÕES - RESP LIMITADA",4,[[1,0,"pl_mad: 0.1944",1],[10,0,"sharpe_zscore: -0.4546",1],[11,4,"total_value_fund: 27957269.16",20]]],["36352662000178","ARX INCOME MASTER FIF - CLASSE DE INVESTIMENTO EM AÇÕES - RESP LIMITADA",4,[[1,4,"pl_mad: 0.1944",1],[10,1,"sharpe_zscore: -0.4535",1],[14,3,"gap_pct: 100",1]]],["38027169000108","ARX INCOME INSTITUCIONAL FIF - CLASSE DE INVESTIMENTO EM COTAS AÇÕES - RESP LIMITADA",4,[[1,4,"pl_mad: 0.1553",1],[10,1,"sharpe_zscore: -0.4537",1],[14,3,"gap_pct: 100",1]]],["57134507000155","ARX INFRA RENDA CDI FI INCENTIVADO DE INFRAESTRUTURA RENDA FIXA CRÉDITO PRIVADO RESP LIMITADA",4,[[1,4,"pl_mad: 0.1831",1],[10,1,"sharpe_zscore: -0.4531",1],[14,3,"gap_pct: 100",1]]],["22015010001610","",3,[[9,3,"days_active: 13",1]]],["00666700001000","",2,[[9,2,"days_active: 4",1]]],["44527494000132","ARX DOVER RECEBÍVEIS FUNDO DE INVESTIMENTO IMOBILIÁRIO DE RESPONSABILIDADE LIMITADA",0,[]],["54869435000104","ARX CHILLON RECEBÍVEIS FUNDO DE INVESTIMENTO IMOBILIÁRIO RESPONSABILIDADE LIMITADA",0,[]],["58198613000165","ARX FUNDO DE INVESTIMENTO IMOBILIÁRIO PORTFÓLIO RENDA CDI+ RESPONSABILIDADE LIMITADA",0,[]],["67731465000193","ARX INCOME CAIXA EXPERT FIC DE FUNDOS DE INVESTIMENTO FINANCEIRO DE AÇÕES - RESP LIMITADA",0,[]]]}</script>
+<script>(function(){
+var D = JSON.parse(document.getElementById('data').textContent);
+var testKeys = D.tests.map(function(t){ return t.key; });
+D.funds = D.rows.map(function(r){
+var detail = {}, hits = [];
+r[3].forEach(function(h){
+var key = testKeys[h[0]];
+if (key === undefined) return;
+hits.push(key);
+detail[key] = {severity: D.severities[h[1]] || '', metric: h[2], events: h[3]};
+});
+return {cnpj: r[0], display: fmtCnpj(r[0]), name: r[1],
+severity: D.severities[r[2]] || '', hits: hits, detail: detail,
+count: hits.length};
+});
+function fmtCnpj(d){
+return d.length === 14
+? d.slice(0,2)+'.'+d.slice(2,5)+'.'+d.slice(5,8)+'/'+d.slice(8,12)+'-'+d.slice(12)
+: d;
+}
+var unrun = D.failed.concat(D.skipped);
+var listEl = document.getElementById('funds');
+var countEl = document.getElementById('count');
+var detailEl = document.getElementById('detail');
+var qEl = document.getElementById('q');
+var onlyEl = document.getElementById('only');
+var selected = null;
+function esc(s){
+return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+});
+}
+function label(key){ return key.replace(/_/g,' '); }
+function explain(key){
+var e = D.explanations[key];
+if (!e) return '';
+var body = '<p>' + esc(e.what) + '</p>';
+if (e.caveats && e.caveats.length){
+body += '<span class="lbl">Could also be</span><ul>' +
+e.caveats.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>';
+}
+if (e.next_steps && e.next_steps.length){
+body += '<span class="lbl">What would settle it</span><ul>' +
+e.next_steps.map(function(c){ return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>';
+}
+return '<details class="explain"><summary>What this means</summary>' +
+'<div class="explain-body">' + body + '</div></details>';
+}
+function matches(f, q){
+if (!q) return true;
+return (f.cnpj.indexOf(q) !== -1) ||
+(f.display.toLowerCase().indexOf(q) !== -1) ||
+(f.name && f.name.toLowerCase().indexOf(q) !== -1);
+}
+function renderList(){
+var q = qEl.value.trim().toLowerCase().replace(/[.\-\/]/g,'');
+var flaggedOnly = onlyEl.checked;
+var rows = D.funds.filter(function(f){
+return matches(f, q) && (!flaggedOnly || f.count > 0);
+});
+var total = rows.length;
+var CAP = 250;
+var capped = total > CAP;
+if (capped) rows = rows.slice(0, CAP);
+countEl.textContent = (capped ? 'showing ' + CAP + ' of ' + total : total) +
+(total === 1 ? ' fund' : ' funds') +
+(q || flaggedOnly ? ' matching' : '');
+if (!total){
+listEl.innerHTML = '<li class="no-hits"><p class="empty" style="padding:14px 20px">' +
+'No fund matches that search.</p></li>';
+return;
+}
+listEl.innerHTML = (capped
+? '<li><p class="truncation">Showing the ' + CAP + ' most severe of ' + total +
+' matches. Narrow the search to see the rest.</p></li>'
+: '') + rows.map(function(f){
+return '<li><button class="fund-btn" data-cnpj="' + f.cnpj + '"' +
+(selected === f.cnpj ? ' aria-current="true"' : '') + '>' +
+'<span class="stripe ' + esc(f.severity) + '"></span>' +
+'<span class="fund-id">' +
+'<span class="cnpj">' + esc(f.display) + '</span>' +
+(f.name ? '<span class="fund-name">' + esc(f.name) + '</span>' : '') +
+'</span>' +
+'<span class="hit-count">' + (f.count
+? '<strong>' + f.count + '</strong>/' + testKeys.length
+: '&mdash;') + '</span>' +
+'</button></li>';
+}).join('');
+}
+function renderDetail(cnpj){
+var f = D.funds.filter(function(x){ return x.cnpj === cnpj; })[0];
+if (!f) return;
+selected = cnpj;
+var cards = testKeys.map(function(key){
+var hit = f.detail[key];
+if (hit){
+var sev = hit.severity || 'flagged';
+return '<li class="test is-fired">' +
+'<div class="test-name"><span>' + esc(hit.title || label(key)) + '</span>' +
+'<span class="chip ' + esc(hit.severity) + '">' + esc(sev) + '</span></div>' +
+(hit.metric ? '<p class="metric">' + esc(hit.metric) + '</p>' : '') +
+(hit.events > 1 ? '<p class="metric">' + hit.events + ' events</p>' : '') +
+explain(key) +
+'</li>';
+}
+if (f.hits.indexOf(key) !== -1){
+return '<li class="test is-fired"><div class="test-name"><span>' +
+esc(label(key)) + '</span><span class="chip LOW">flagged</span></div></li>';
+}
+return '<li class="test is-clean"><div class="test-name"><span>' + esc(label(key)) +
+'</span><span class="chip clean">clean</span></div></li>';
+});
+var unrunCards = unrun.map(function(a){
+return '<li class="test is-unrun"><div class="test-name"><span>' + esc(label(a)) +
+'</span><span class="chip unrun">not run</span></div>' +
+'<p class="unrun-why">No result either way.</p></li>';
+});
+detailEl.innerHTML =
+'<div class="detail-head">' +
+'<h2>' + esc(f.name || 'Fund ' + f.display) + '</h2>' +
+'<p class="cnpj">' + esc(f.display) + '</p>' +
+(f.count
+? '<span class="verdict flagged">' + f.count + ' of ' + testKeys.length +
+' detectors flagged this fund</span>'
+: '<span class="verdict clear">No detector flagged this fund</span>') +
+'</div>' +
+'<ul class="matrix">' + cards.join('') + '</ul>' +
+(unrunCards.length
+? '<p class="section-label">Did not run</p><ul class="matrix">' +
+unrunCards.join('') + '</ul>'
+: '') +
+(D.entity_level.length
+? '<p class="section-label">Reported at issuer or manager level</p>' +
+'<p class="entity-note">' + D.entity_level.map(label).map(esc).join(', ') +
+' — these key on a counterparty rather than a fund, so they are not part ' +
+'of this matrix.</p>'
+: '');
+renderList();
+}
+listEl.addEventListener('click', function(e){
+var btn = e.target.closest('.fund-btn');
+if (btn) renderDetail(btn.getAttribute('data-cnpj'));
+});
+qEl.addEventListener('input', renderList);
+onlyEl.addEventListener('change', renderList);
+renderList();
+if (D.funds.length && D.funds[0].count) renderDetail(D.funds[0].cnpj);
+})();</script>
+
+</body>
+</html>

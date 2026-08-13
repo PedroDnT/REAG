@@ -324,6 +324,22 @@ def load_run(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def _squeeze(text: str) -> str:
+    """Strip comments and indentation from generated CSS/JS.
+
+    The stylesheet and script are generated, never hand-edited in the output,
+    so shipping their indentation only costs bandwidth. Kept deliberately
+    conservative -- comment and leading-whitespace removal only, no renaming or
+    semicolon elision, so a broken minifier can never be the reason the page
+    fails to load.
+    """
+    import re
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+    text = re.sub(r"^[ \t]+", "", text, flags=re.M)
+    return re.sub(r"\n{2,}", "\n", text).strip()
+
+
 def _compact(data: dict[str, Any]) -> dict[str, Any]:
     """Re-encode the fund table columnar.
 
@@ -350,6 +366,11 @@ def _compact(data: dict[str, Any]) -> dict[str, Any]:
                      if fund["severity"] in sev else 0, hits])
 
     out = {k: v for k, v in data.items() if k != "funds"}
+    # selected_cnpjs repeats every CNPJ already carried in `rows` -- on a full
+    # month that is 25,509 duplicated identifiers, roughly 350 KB of payload
+    # that renders nothing. The counts stay; the list goes.
+    out["scope"] = {k: v for k, v in (out.get("scope") or {}).items()
+                    if k != "selected_cnpjs"}
     out["severities"] = sev
     out["rows"] = rows
     return out
@@ -409,18 +430,18 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
 </footer>
 
 <script id="data" type="application/json">{payload}</script>
-<script>{_SCRIPT}</script>
+<script>{_squeeze(_SCRIPT)}</script>
 """
 
     if fragment:
-        return f"<style>{_STYLE}</style>\n{body}"
+        return f"<style>{_squeeze(_STYLE)}</style>\n{body}"
 
     return (
         "<!doctype html>\n<html lang=\"en\">\n<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
         f"<title>Fund screening — {html.escape(str(data['run_id']))}</title>\n"
-        f"<style>{_STYLE}</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
+        f"<style>{_squeeze(_STYLE)}</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
 
 
