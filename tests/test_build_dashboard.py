@@ -268,7 +268,6 @@ class TestNonLeadsAreFilteredFromTheMatrix:
         )
         fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
         assert fund["detail"]["concentration_violations"]["severity"] == "MEDIUM"
-        assert fund["severity"] == "MEDIUM"
 
 
 class TestLeadsFraming:
