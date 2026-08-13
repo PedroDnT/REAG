@@ -173,53 +173,96 @@ class ConcentrationAnalyzer:
         logger.info("Detectando concentracao excessiva...")
 
         if target_funds is None:
-            target_funds = cda_df['CNPJ_FUNDO'].unique()
-
-        violations = []
-
-        for fund_cnpj in target_funds:
-            metrics = self.analyze_fund_concentration(cda_df, fund_cnpj)
-
-            if not metrics:
-                continue
-
-            # Critérios de red flag
-            is_violation = (
-                metrics['violates_limit'] or  # Violação regulatória
-                metrics['hhi'] > HHI_HIGH or  # HHI muito alto
-                metrics['top5_pct'] > 75  # Top 5 > 75%
-            )
-
-            if is_violation:
-                # Determinar severity
-                if metrics['top1_pct'] > 50:
-                    severity = 'CRITICAL'
-                elif metrics['top1_pct'] > 40:
-                    severity = 'HIGH'
-                else:
-                    severity = 'MEDIUM'
-
-                # Determinar fraud flag
-                fraud_flags = []
-                if metrics['violates_limit']:
-                    fraud_flags.append('REGULATORY_VIOLATION')
-                if metrics['hhi'] > 0.30:
-                    fraud_flags.append('EXTREME_CONCENTRATION')
-                if metrics['top5_pct'] > 85:
-                    fraud_flags.append('INSUFFICIENT_DIVERSIFICATION')
-
-                metrics['severity'] = severity
-                metrics['fraud_flags'] = ', '.join(fraud_flags)
-                violations.append(metrics)
-
-        result_df = pd.DataFrame(violations)
-
-        if not result_df.empty:
-            result_df = result_df.sort_values('top1_pct', ascending=False)
-            logger.warning(f"{len(result_df)} fundos com concentracao excessiva!")
+            portfolio = cda_df
         else:
-            logger.info("Nenhuma violacao de concentracao detectada")
+            portfolio = cda_df[cda_df["CNPJ_FUNDO"].isin(target_funds)]
 
+        if portfolio.empty or "VL_MERCADO" not in portfolio.columns:
+            return pd.DataFrame()
+
+        work = portfolio[["CNPJ_FUNDO", "CD_ATIVO", "VL_MERCADO"]].copy()
+        work["VL_MERCADO"] = pd.to_numeric(work["VL_MERCADO"], errors="coerce").fillna(0.0)
+        work = work[work["VL_MERCADO"] > 0]
+        if work.empty:
+            return pd.DataFrame()
+
+        totals = work.groupby("CNPJ_FUNDO", sort=False)["VL_MERCADO"].sum().rename("total_portfolio_value")
+        work = work.join(totals, on="CNPJ_FUNDO")
+        work["weight"] = work["VL_MERCADO"] / work["total_portfolio_value"]
+        work["rank"] = work.groupby("CNPJ_FUNDO", sort=False)["VL_MERCADO"].rank(
+            ascending=False, method="first"
+        )
+
+        hhi = work.groupby("CNPJ_FUNDO", sort=False)["weight"].apply(lambda w: float((w ** 2).sum()))
+        top1 = work.loc[work["rank"] == 1].set_index("CNPJ_FUNDO")
+        top5 = (
+            work.loc[work["rank"] <= 5]
+            .groupby("CNPJ_FUNDO", sort=False)["VL_MERCADO"]
+            .sum()
+        )
+        top10 = (
+            work.loc[work["rank"] <= 10]
+            .groupby("CNPJ_FUNDO", sort=False)["VL_MERCADO"]
+            .sum()
+        )
+        num_positions = work.groupby("CNPJ_FUNDO", sort=False).size().rename("num_positions")
+
+        metrics = pd.DataFrame({
+            "total_portfolio_value": totals,
+            "hhi": hhi,
+            "num_positions": num_positions,
+            "top1_value": top1["VL_MERCADO"],
+            "largest_position": top1["CD_ATIVO"],
+            "top5_value": top5,
+            "top10_value": top10,
+        })
+        metrics["top1_pct"] = metrics["top1_value"] / metrics["total_portfolio_value"] * 100.0
+        metrics["top5_pct"] = metrics["top5_value"] / metrics["total_portfolio_value"] * 100.0
+        metrics["top10_pct"] = metrics["top10_value"] / metrics["total_portfolio_value"] * 100.0
+        metrics["category"] = metrics.index.map(lambda c: self.fund_categories.get(c, "DEFAULT"))
+        metrics["regulatory_limit_pct"] = metrics["category"].map(
+            lambda c: self.concentration_limits.get(c, 0.25) * 100.0
+        )
+        metrics["violates_limit"] = metrics["top1_pct"] > metrics["regulatory_limit_pct"]
+        metrics["largest_position_value"] = metrics["top1_value"]
+
+        flagged = metrics[
+            metrics["violates_limit"]
+            | (metrics["hhi"] > HHI_HIGH)
+            | (metrics["top5_pct"] > 75)
+        ].copy()
+        if flagged.empty:
+            logger.info("Nenhuma violacao de concentracao detectada")
+            return pd.DataFrame()
+
+        def _severity(top1_pct: float) -> str:
+            if top1_pct > 50:
+                return "CRITICAL"
+            if top1_pct > 40:
+                return "HIGH"
+            return "MEDIUM"
+
+        def _flags(row: pd.Series) -> str:
+            fraud_flags = []
+            if row["violates_limit"]:
+                fraud_flags.append("REGULATORY_VIOLATION")
+            if row["hhi"] > 0.30:
+                fraud_flags.append("EXTREME_CONCENTRATION")
+            if row["top5_pct"] > 85:
+                fraud_flags.append("INSUFFICIENT_DIVERSIFICATION")
+            return ", ".join(fraud_flags)
+
+        flagged["severity"] = flagged["top1_pct"].map(_severity)
+        flagged["fraud_flags"] = flagged.apply(_flags, axis=1)
+        result_df = (
+            flagged.reset_index()
+            .rename(columns={"index": "CNPJ_FUNDO"})
+            .sort_values("top1_pct", ascending=False)
+        )
+        if "CNPJ_FUNDO" not in result_df.columns and result_df.columns[0] != "CNPJ_FUNDO":
+            result_df = result_df.rename(columns={result_df.columns[0]: "CNPJ_FUNDO"})
+
+        logger.warning(f"{len(result_df)} fundos com concentracao excessiva!")
         return result_df
 
     def detect_related_party_concentration(self, cda_df: pd.DataFrame,

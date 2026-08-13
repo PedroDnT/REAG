@@ -95,45 +95,55 @@ class PeerComparisonAnalyzer:
             raise ValueError(f"Colunas faltando: {missing}")
 
         # Calcular retorno diário
-        informe_df = informe_df.sort_values(['CNPJ_FUNDO', 'DT_COMPTC'])
-        informe_df['RETORNO_DIA'] = informe_df.groupby('CNPJ_FUNDO')['VL_QUOTA'].pct_change() * 100
+        informe_df = informe_df.sort_values(["CNPJ_FUNDO", "DT_COMPTC"]).copy()
+        informe_df["RETORNO_DIA"] = (
+            informe_df.groupby("CNPJ_FUNDO")["VL_QUOTA"].pct_change() * 100
+        )
 
-        # Agregar por fundo
-        metrics = []
+        returns = informe_df.dropna(subset=["RETORNO_DIA"])
+        if returns.empty:
+            return pd.DataFrame()
 
-        for cnpj in informe_df['CNPJ_FUNDO'].unique():
-            fund_data = informe_df[informe_df['CNPJ_FUNDO'] == cnpj]
-            returns = fund_data['RETORNO_DIA'].dropna()
+        # Aggregate once per fund -- filtering the full informe per CNPJ is
+        # O(funds x rows) and dominates a full-universe peer pass.
+        grouped = returns.groupby("CNPJ_FUNDO", sort=False)
+        stats = grouped["RETORNO_DIA"].agg(
+            avg_return="mean",
+            volatility="std",
+            num_observations="count",
+        )
+        positive_days = grouped["RETORNO_DIA"].apply(lambda s: float((s > 0).sum()))
+        stats = stats.join(positive_days.rename("positive_days"), how="left")
+        stats = stats[stats["num_observations"] >= MIN_OBSERVATIONS]
+        if stats.empty:
+            return pd.DataFrame()
 
-            if len(returns) < MIN_OBSERVATIONS:  # Mínimo de dados
-                continue
+        stats["positive_days_pct"] = (
+            stats["positive_days"] / stats["num_observations"] * 100.0
+        )
+        stats["sharpe_ratio"] = stats["avg_return"] / stats["volatility"].replace(0, pd.NA)
+        stats["sharpe_ratio"] = stats["sharpe_ratio"].fillna(0.0)
 
-            # Calcular métricas
-            avg_return = returns.mean()
-            volatility = returns.std()
-            sharpe = avg_return / volatility if volatility > 0 else 0
+        if "VL_PATRIM_LIQ" in informe_df.columns:
+            avg_pl = informe_df.groupby("CNPJ_FUNDO", sort=False)["VL_PATRIM_LIQ"].mean()
+            stats = stats.join(avg_pl.rename("avg_pl"), how="left")
+        else:
+            stats["avg_pl"] = 0.0
 
-            # % de dias positivos
-            positive_days_pct = (returns > 0).sum() / len(returns) * 100
-
-            # Patrimônio médio
-            avg_pl = fund_data['VL_PATRIM_LIQ'].mean() if 'VL_PATRIM_LIQ' in fund_data.columns else 0
-
-            # Categoria
-            category = self.fund_categories.get(cnpj, 'UNKNOWN')
-
-            metrics.append({
-                'CNPJ_FUNDO': cnpj,
-                'category': category,
-                'avg_return': avg_return,
-                'volatility': volatility,
-                'sharpe_ratio': sharpe,
-                'positive_days_pct': positive_days_pct,
-                'num_observations': len(returns),
-                'avg_pl': avg_pl
-            })
-
-        metrics_df = pd.DataFrame(metrics)
+        stats = stats.reset_index()
+        stats["category"] = stats["CNPJ_FUNDO"].map(self.fund_categories).fillna("UNKNOWN")
+        metrics_df = stats[
+            [
+                "CNPJ_FUNDO",
+                "category",
+                "avg_return",
+                "volatility",
+                "sharpe_ratio",
+                "positive_days_pct",
+                "num_observations",
+                "avg_pl",
+            ]
+        ]
         logger.info(f"Metricas calculadas para {len(metrics_df):,} fundos")
 
         return metrics_df

@@ -287,12 +287,10 @@ class BenfordLawAnalyzer:
 
         results = []
 
-        # Analyze by fund
-        for fund_cnpj in informe_df['CNPJ_FUNDO'].unique():
-            fund_data = informe_df[informe_df['CNPJ_FUNDO'] == fund_cnpj]
-
+        # groupby walks each fund once; filtering the full frame per CNPJ is O(n^2).
+        for fund_cnpj, fund_data in informe_df.groupby("CNPJ_FUNDO", sort=False):
             fund_results = {
-                'fund_cnpj': fund_cnpj
+                "fund_cnpj": fund_cnpj
             }
 
             # Test PL (Patrimônio Líquido)

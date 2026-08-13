@@ -61,37 +61,63 @@ class FraudSchemeDetector:
         """
         logger.info("Detectando fluxo circular (Banco Master pattern)...")
 
+        # Admins with fewer than two funds cannot form a circular fund-to-fund
+        # edge. Build the admin map once; scanning CDA once per fund is O(funds
+        # x rows) and stalls a full-universe month for hours.
+        admin_fund_counts = cadastro_df.groupby("CNPJ_ADMIN")["CNPJ_FUNDO"].nunique()
+        multi_fund_admins = set(admin_fund_counts[admin_fund_counts >= 2].index)
+        if not multi_fund_admins:
+            logger.info("Nenhum fluxo circular detectado")
+            return pd.DataFrame()
+
+        fund_to_admin = (
+            cadastro_df.loc[
+                cadastro_df["CNPJ_ADMIN"].isin(multi_fund_admins),
+                ["CNPJ_FUNDO", "CNPJ_ADMIN"],
+            ]
+            .drop_duplicates("CNPJ_FUNDO")
+            .set_index("CNPJ_FUNDO")["CNPJ_ADMIN"]
+        )
+        fund_cnpjs = set(fund_to_admin.index)
+
+        holdings = cda_df.loc[cda_df["CD_ATIVO"].isin(fund_cnpjs), [
+            "CNPJ_FUNDO", "CD_ATIVO", "VL_MERCADO",
+        ]].copy()
+        if holdings.empty:
+            logger.info("Nenhum fluxo circular detectado")
+            return pd.DataFrame()
+
+        holdings["holder_admin"] = holdings["CNPJ_FUNDO"].map(fund_to_admin)
+        holdings["asset_admin"] = holdings["CD_ATIVO"].map(fund_to_admin)
+        circular = holdings[
+            holdings["holder_admin"].notna()
+            & holdings["asset_admin"].notna()
+            & (holdings["holder_admin"] == holdings["asset_admin"])
+            & (holdings["CNPJ_FUNDO"] != holdings["CD_ATIVO"])
+        ]
+        if circular.empty:
+            logger.info("Nenhum fluxo circular detectado")
+            return pd.DataFrame()
+
+        # total_value matches the pre-vectorized detector: sum over every holder
+        # of the asset, not only same-admin circular edges.
+        total_by_asset = holdings.groupby("CD_ATIVO")["VL_MERCADO"].sum()
+
         circular_flows = []
-
-        # Identificar fundos do mesmo administrador
-        admin_groups = cadastro_df.groupby('CNPJ_ADMIN')['CNPJ_FUNDO'].apply(list).to_dict()
-
-        for admin_cnpj, fund_list in admin_groups.items():
-            if len(fund_list) < 2:
-                continue  # Precisa ter múltiplos fundos
-
-            # Verificar se fundos investem uns nos outros
-            for fund_cnpj in fund_list:
-                # Verificar se este fundo aparece como ativo em outros fundos
-                fund_as_asset = cda_df[cda_df['CD_ATIVO'] == fund_cnpj]
-
-                if not fund_as_asset.empty:
-                    # Verificar se quem detém é outro fundo do mesmo admin
-                    holders = fund_as_asset['CNPJ_FUNDO'].unique()
-
-                    circular_holders = [h for h in holders if h in fund_list]
-
-                    if circular_holders:
-                        circular_flows.append({
-                            'admin_cnpj': admin_cnpj,
-                            'fund_as_asset': fund_cnpj,
-                            'held_by_funds': circular_holders,
-                            'num_circular_connections': len(circular_holders),
-                            'total_value': fund_as_asset['VL_MERCADO'].sum(),
-                            'fraud_pattern': 'CIRCULAR_FUND_INVESTMENT',
-                            'severity': 'CRITICAL',
-                            'banco_master_similarity': 'HIGH'
-                        })
+        for (admin_cnpj, fund_cnpj), group in circular.groupby(
+            ["asset_admin", "CD_ATIVO"], sort=False
+        ):
+            holders = group["CNPJ_FUNDO"].unique().tolist()
+            circular_flows.append({
+                "admin_cnpj": admin_cnpj,
+                "fund_as_asset": fund_cnpj,
+                "held_by_funds": holders,
+                "num_circular_connections": len(holders),
+                "total_value": float(total_by_asset.get(fund_cnpj, 0.0)),
+                "fraud_pattern": "CIRCULAR_FUND_INVESTMENT",
+                "severity": "CRITICAL",
+                "banco_master_similarity": "HIGH",
+            })
 
         result_df = pd.DataFrame(circular_flows)
 
@@ -122,56 +148,58 @@ class FraudSchemeDetector:
         """
         logger.info("Detectando fundos em camadas...")
 
-        layered_structures = []
-
         # Identificar fundos que investem em outros fundos
-        fund_holdings = cda_df[cda_df['CD_ATIVO'].str.len() == 14].copy()  # CNPJs = fundos
+        fund_holdings = cda_df[cda_df["CD_ATIVO"].str.len() == 14].copy()  # CNPJs = fundos
 
         if fund_holdings.empty:
             logger.info("Nenhuma estrutura de camadas detectada")
             return pd.DataFrame()
 
-        # Mapear administrador de cada fundo
-        fund_to_admin = cadastro_df.set_index('CNPJ_FUNDO')['CNPJ_ADMIN'].to_dict()
+        fund_to_admin = cadastro_df.set_index("CNPJ_FUNDO")["CNPJ_ADMIN"].to_dict()
+        fund_holdings["holder_admin"] = fund_holdings["CNPJ_FUNDO"].map(fund_to_admin)
+        fund_holdings["held_admin"] = fund_holdings["CD_ATIVO"].map(fund_to_admin)
 
-        # Vectorized approach: add admin columns to fund_holdings
-        fund_holdings['holder_admin'] = fund_holdings['CNPJ_FUNDO'].map(fund_to_admin)
-        fund_holdings['held_admin'] = fund_holdings['CD_ATIVO'].map(fund_to_admin)
-
-        # Filter to same admin only (much faster than checking in loop)
         same_admin = fund_holdings[
-            (fund_holdings['holder_admin'].notna()) &
-            (fund_holdings['held_admin'].notna()) &
-            (fund_holdings['holder_admin'] == fund_holdings['held_admin'])
+            fund_holdings["holder_admin"].notna()
+            & fund_holdings["held_admin"].notna()
+            & (fund_holdings["holder_admin"] == fund_holdings["held_admin"])
+        ]
+        if same_admin.empty:
+            logger.info("Nenhuma estrutura de camadas detectada")
+            return pd.DataFrame()
+
+        # Precompute mean daily returns once. Looking up informe per edge was
+        # O(edges x informe rows) and dominates a full-universe run.
+        avg_daily_return = self._mean_daily_quota_return_by_fund(informe_df)
+        if avg_daily_return.empty:
+            logger.info("Nenhuma estrutura de camadas detectada")
+            return pd.DataFrame()
+
+        same_admin = same_admin.copy()
+        same_admin["holder_avg_daily_return"] = same_admin["CNPJ_FUNDO"].map(avg_daily_return)
+        same_admin["held_avg_daily_return"] = same_admin["CD_ATIVO"].map(avg_daily_return)
+        flagged = same_admin[
+            same_admin["holder_avg_daily_return"].notna()
+            & same_admin["held_avg_daily_return"].notna()
+            & (
+                (same_admin["holder_avg_daily_return"] > 1)
+                | (same_admin["held_avg_daily_return"] > 1)
+            )
         ]
 
-        # Use itertuples for remaining processing (10-100x faster than iterrows)
-        for row in same_admin.itertuples():
-            holder_fund = row.CNPJ_FUNDO
-            held_fund = row.CD_ATIVO
-            holder_admin = row.holder_admin
-
-            # Verificar retornos recentes
-            holder_returns = informe_df[informe_df['CNPJ_FUNDO'] == holder_fund]
-            held_returns = informe_df[informe_df['CNPJ_FUNDO'] == held_fund]
-
-            if not holder_returns.empty and not held_returns.empty:
-                holder_avg_return = holder_returns['VL_QUOTA'].pct_change().mean() * 100
-                held_avg_return = held_returns['VL_QUOTA'].pct_change().mean() * 100
-
-                # Red flag se retornos muito altos
-                if holder_avg_return > 1 or held_avg_return > 1:  # > 1% ao dia
-                    layered_structures.append({
-                        'admin_cnpj': holder_admin,
-                        'holder_fund': holder_fund,
-                        'held_fund': held_fund,
-                        'investment_value': row.VL_MERCADO,
-                        'holder_avg_daily_return': holder_avg_return,
-                        'held_avg_daily_return': held_avg_return,
-                        'fraud_pattern': 'LAYERED_FUND_STRUCTURE',
-                        'severity': 'HIGH' if holder_avg_return > 2 else 'MEDIUM',
-                        'banco_master_similarity': 'MEDIUM'
-                    })
+        layered_structures = []
+        for row in flagged.itertuples():
+            layered_structures.append({
+                "admin_cnpj": row.holder_admin,
+                "holder_fund": row.CNPJ_FUNDO,
+                "held_fund": row.CD_ATIVO,
+                "investment_value": row.VL_MERCADO,
+                "holder_avg_daily_return": row.holder_avg_daily_return,
+                "held_avg_daily_return": row.held_avg_daily_return,
+                "fraud_pattern": "LAYERED_FUND_STRUCTURE",
+                "severity": "HIGH" if row.holder_avg_daily_return > 2 else "MEDIUM",
+                "banco_master_similarity": "MEDIUM",
+            })
 
         result_df = pd.DataFrame(layered_structures)
 
@@ -200,51 +228,67 @@ class FraudSchemeDetector:
         """
         logger.info("Detectando inflacao de ativos...")
 
+        # The legacy detector only emitted findings when PL was available to
+        # compute avg_pl_change; keep that gate so an informe without the
+        # column cannot suddenly start flagging inflation cases.
+        if (
+            cda_df.empty
+            or informe_df.empty
+            or "VL_PATRIM_LIQ" not in informe_df.columns
+        ):
+            logger.info("Nenhuma inflacao de ativos detectada")
+            return pd.DataFrame()
+
+        portfolio = cda_df[["CNPJ_FUNDO", "CD_ATIVO", "VL_MERCADO"]].copy()
+        portfolio["VL_MERCADO"] = pd.to_numeric(portfolio["VL_MERCADO"], errors="coerce").fillna(0.0)
+        illiquid_pattern = "CRI|CRA|DEBENTURE|CDB"
+        portfolio["is_illiquid"] = portfolio["CD_ATIVO"].astype(str).str.contains(
+            illiquid_pattern, case=False, na=False, regex=True
+        )
+        portfolio["illiquid_value"] = portfolio["VL_MERCADO"].where(portfolio["is_illiquid"], 0.0)
+
+        by_fund = portfolio.groupby("CNPJ_FUNDO", sort=False).agg(
+            total_portfolio_value=("VL_MERCADO", "sum"),
+            illiquid_value=("illiquid_value", "sum"),
+        )
+        by_fund = by_fund[by_fund["total_portfolio_value"] > 0]
+        if by_fund.empty:
+            logger.info("Nenhuma inflacao de ativos detectada")
+            return pd.DataFrame()
+
+        by_fund["illiquid_pct"] = (
+            by_fund["illiquid_value"] / by_fund["total_portfolio_value"] * 100.0
+        )
+
+        avg_return = self._mean_daily_quota_return_by_fund(informe_df)
+        avg_pl_change = self._mean_daily_pl_change_by_fund(informe_df)
+        by_fund = by_fund.join(avg_return.rename("avg_daily_return"), how="inner")
+        by_fund = by_fund.join(avg_pl_change.rename("avg_pl_change"), how="left")
+
+        flagged = by_fund[
+            (by_fund["illiquid_pct"] > ASSET_INFLATION_ILLIQUID_PCT)
+            & (by_fund["avg_daily_return"] > ASSET_INFLATION_MIN_RETURN_PCT)
+        ]
+        if flagged.empty:
+            logger.info("Nenhuma inflacao de ativos detectada")
+            return pd.DataFrame()
+
         inflation_cases = []
-
-        # Agrupar por fundo
-        for fund_cnpj in cda_df['CNPJ_FUNDO'].unique():
-            portfolio = cda_df[cda_df['CNPJ_FUNDO'] == fund_cnpj]
-            fund_performance = informe_df[informe_df['CNPJ_FUNDO'] == fund_cnpj]
-
-            if portfolio.empty or fund_performance.empty:
-                continue
-
-            total_value = portfolio['VL_MERCADO'].sum()
-
-            # Calcular % em ativos ilíquidos using vectorized regex (much faster than lambda)
-            illiquid_types = ['CRI', 'CRA', 'DEBENTURE', 'CDB']
-            illiquid_pattern = '|'.join(illiquid_types)
-            illiquid_mask = portfolio['CD_ATIVO'].str.contains(illiquid_pattern, case=False, na=False, regex=True)
-            illiquid_value = portfolio[illiquid_mask]['VL_MERCADO'].sum()
-            illiquid_pct = (illiquid_value / total_value * 100) if total_value > 0 else 0
-
-            # Calcular retorno médio
-            fund_performance_sorted = fund_performance.sort_values('DT_COMPTC')
-            if len(fund_performance_sorted) < 2:
-                continue
-
-            returns = fund_performance_sorted['VL_QUOTA'].pct_change().dropna()
-            avg_return = returns.mean() * 100  # % ao dia
-
-            # Calcular crescimento de PL vs fluxos
-            if 'VL_PATRIM_LIQ' in fund_performance.columns:
-                pl_change = fund_performance['VL_PATRIM_LIQ'].pct_change().mean() * 100
-
-                # Red flags
-                if (illiquid_pct > ASSET_INFLATION_ILLIQUID_PCT and avg_return > ASSET_INFLATION_MIN_RETURN_PCT):
-                    # >70% ilíquido com retorno >0.5% ao dia = suspeito
-                    inflation_cases.append({
-                        'fund_cnpj': fund_cnpj,
-                        'total_portfolio_value': total_value,
-                        'illiquid_pct': illiquid_pct,
-                        'avg_daily_return': avg_return,
-                        'avg_pl_change': pl_change,
-                        'fraud_pattern': 'ILLIQUID_ASSET_INFLATION',
-                        'severity': 'CRITICAL' if illiquid_pct > 85 else 'HIGH',
-                        'banco_master_similarity': 'HIGH',
-                        'explanation': f'{illiquid_pct:.0f}% illiquid assets with {avg_return:.2f}% daily return'
-                    })
+        for fund_cnpj, row in flagged.iterrows():
+            inflation_cases.append({
+                "fund_cnpj": fund_cnpj,
+                "total_portfolio_value": row["total_portfolio_value"],
+                "illiquid_pct": row["illiquid_pct"],
+                "avg_daily_return": row["avg_daily_return"],
+                "avg_pl_change": row["avg_pl_change"],
+                "fraud_pattern": "ILLIQUID_ASSET_INFLATION",
+                "severity": "CRITICAL" if row["illiquid_pct"] > 85 else "HIGH",
+                "banco_master_similarity": "HIGH",
+                "explanation": (
+                    f"{row['illiquid_pct']:.0f}% illiquid assets with "
+                    f"{row['avg_daily_return']:.2f}% daily return"
+                ),
+            })
 
         result_df = pd.DataFrame(inflation_cases)
 
@@ -273,50 +317,59 @@ class FraudSchemeDetector:
         """
         logger.info("Detectando redes de empresas de fachada...")
 
-        if 'EMISSOR' not in cda_df.columns:
+        if "EMISSOR" not in cda_df.columns:
             logger.warning("Coluna EMISSOR nao encontrada")
             return pd.DataFrame()
 
+        shell_patterns = ["LTDA ME", "LTDA-ME", "EIRELI", "LTDA EPP"]
+        shell_regex = "|".join(shell_patterns)
+
+        fund_to_admin = (
+            cadastro_df[["CNPJ_FUNDO", "CNPJ_ADMIN"]]
+            .dropna()
+            .drop_duplicates("CNPJ_FUNDO")
+            .set_index("CNPJ_FUNDO")["CNPJ_ADMIN"]
+        )
+        admin_fund_counts = cadastro_df.groupby("CNPJ_ADMIN")["CNPJ_FUNDO"].nunique()
+
+        portfolio = cda_df[["CNPJ_FUNDO", "EMISSOR", "VL_MERCADO"]].copy()
+        portfolio["CNPJ_ADMIN"] = portfolio["CNPJ_FUNDO"].map(fund_to_admin)
+        portfolio = portfolio.dropna(subset=["CNPJ_ADMIN"])
+        if portfolio.empty:
+            logger.info("Nenhuma rede de shells detectada")
+            return pd.DataFrame()
+
+        portfolio["EMISSOR"] = portfolio["EMISSOR"].astype(str)
+        portfolio["is_shell"] = portfolio["EMISSOR"].str.upper().str.contains(
+            shell_regex, na=False, regex=True
+        )
+
         shell_networks = []
-
-        # Padrões de empresas de fachada
-        shell_patterns = ['LTDA ME', 'LTDA-ME', 'EIRELI', 'LTDA EPP']
-
-        # Agrupar por administrador
-        admin_groups = cadastro_df.groupby('CNPJ_ADMIN')['CNPJ_FUNDO'].apply(list).to_dict()
-
-        for admin_cnpj, fund_list in admin_groups.items():
-            admin_portfolio = cda_df[cda_df['CNPJ_FUNDO'].isin(fund_list)]
-
-            if admin_portfolio.empty:
+        for admin_cnpj, admin_portfolio in portfolio.groupby("CNPJ_ADMIN", sort=False):
+            suspicious_issuers = (
+                admin_portfolio.loc[admin_portfolio["is_shell"], "EMISSOR"]
+                .drop_duplicates()
+                .tolist()
+            )
+            if len(suspicious_issuers) < SHELL_NETWORK_MIN_COUNT:
                 continue
 
-            # Contar emissores com padrões suspeitos
-            issuers = admin_portfolio['EMISSOR'].dropna().unique()
-
-            suspicious_issuers = [
-                iss for iss in issuers
-                if any(pattern in str(iss).upper() for pattern in shell_patterns)
-            ]
-
-            if len(suspicious_issuers) >= SHELL_NETWORK_MIN_COUNT:  # Múltiplas shells = red flag
-                # Calcular valor total
-                suspicious_mask = admin_portfolio['EMISSOR'].isin(suspicious_issuers)
-                suspicious_value = admin_portfolio[suspicious_mask]['VL_MERCADO'].sum()
-                total_value = admin_portfolio['VL_MERCADO'].sum()
-
-                shell_networks.append({
-                    'admin_cnpj': admin_cnpj,
-                    'num_suspicious_issuers': len(suspicious_issuers),
-                    'suspicious_issuers': suspicious_issuers[:10],  # Top 10
-                    'suspicious_value': suspicious_value,
-                    'suspicious_pct': (suspicious_value / total_value * 100) if total_value > 0 else 0,
-                    'num_funds_affected': len(fund_list),
-                    'fraud_pattern': 'SHELL_COMPANY_NETWORK',
-                    'severity': 'CRITICAL' if len(suspicious_issuers) > 20 else 'HIGH',
-                    'banco_master_similarity': 'VERY_HIGH',
-                    'explanation': f'{len(suspicious_issuers)} shell companies detected'
-                })
+            suspicious_value = admin_portfolio.loc[
+                admin_portfolio["is_shell"], "VL_MERCADO"
+            ].sum()
+            total_value = admin_portfolio["VL_MERCADO"].sum()
+            shell_networks.append({
+                "admin_cnpj": admin_cnpj,
+                "num_suspicious_issuers": len(suspicious_issuers),
+                "suspicious_issuers": suspicious_issuers[:10],
+                "suspicious_value": suspicious_value,
+                "suspicious_pct": (suspicious_value / total_value * 100) if total_value > 0 else 0,
+                "num_funds_affected": int(admin_fund_counts.get(admin_cnpj, 0)),
+                "fraud_pattern": "SHELL_COMPANY_NETWORK",
+                "severity": "CRITICAL" if len(suspicious_issuers) > 20 else "HIGH",
+                "banco_master_similarity": "VERY_HIGH",
+                "explanation": f"{len(suspicious_issuers)} shell companies detected",
+            })
 
         result_df = pd.DataFrame(shell_networks)
 
@@ -326,6 +379,34 @@ class FraudSchemeDetector:
             logger.info("Nenhuma rede de shells detectada")
 
         return result_df
+
+    @staticmethod
+    def _mean_daily_quota_return_by_fund(informe_df: pd.DataFrame) -> pd.Series:
+        """Mean daily VL_QUOTA percent change per fund, as percent points."""
+        if informe_df.empty or "VL_QUOTA" not in informe_df.columns:
+            return pd.Series(dtype=float)
+
+        work = informe_df[["CNPJ_FUNDO", "DT_COMPTC", "VL_QUOTA"]].copy()
+        work["DT_COMPTC"] = pd.to_datetime(work["DT_COMPTC"], errors="coerce")
+        work["VL_QUOTA"] = pd.to_numeric(work["VL_QUOTA"], errors="coerce")
+        work = work.dropna(subset=["CNPJ_FUNDO", "DT_COMPTC", "VL_QUOTA"])
+        work = work.sort_values(["CNPJ_FUNDO", "DT_COMPTC"])
+        work["daily_return"] = work.groupby("CNPJ_FUNDO", sort=False)["VL_QUOTA"].pct_change()
+        return work.groupby("CNPJ_FUNDO", sort=False)["daily_return"].mean() * 100.0
+
+    @staticmethod
+    def _mean_daily_pl_change_by_fund(informe_df: pd.DataFrame) -> pd.Series:
+        """Mean daily VL_PATRIM_LIQ percent change per fund, as percent points."""
+        if informe_df.empty or "VL_PATRIM_LIQ" not in informe_df.columns:
+            return pd.Series(dtype=float)
+
+        work = informe_df[["CNPJ_FUNDO", "DT_COMPTC", "VL_PATRIM_LIQ"]].copy()
+        work["DT_COMPTC"] = pd.to_datetime(work["DT_COMPTC"], errors="coerce")
+        work["VL_PATRIM_LIQ"] = pd.to_numeric(work["VL_PATRIM_LIQ"], errors="coerce")
+        work = work.dropna(subset=["CNPJ_FUNDO", "DT_COMPTC", "VL_PATRIM_LIQ"])
+        work = work.sort_values(["CNPJ_FUNDO", "DT_COMPTC"])
+        work["pl_change"] = work.groupby("CNPJ_FUNDO", sort=False)["VL_PATRIM_LIQ"].pct_change()
+        return work.groupby("CNPJ_FUNDO", sort=False)["pl_change"].mean() * 100.0
 
     def generate_fraud_scheme_report(self, informe_df: pd.DataFrame,
                                      cda_df: pd.DataFrame,
