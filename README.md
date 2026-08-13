@@ -8,9 +8,9 @@ quotaholder counts), CDA (portfolio composition) and cadastro (fund registry) â€
 and runs a battery of detectors over them, producing per-fund findings with
 plain-language briefs explaining what was flagged and what would corroborate it.
 
-Detection patterns are drawn from documented cases, notably the Banco Master /
-REAG scheme: circular fund-to-fund flows, phantom assets, valuation smoothing,
-window dressing, and cross-fund issuer concentration.
+Detection patterns are drawn from documented Brazilian fund-industry cases:
+circular fund-to-fund flows, phantom assets, valuation smoothing, window
+dressing, and cross-fund issuer concentration.
 
 > **Findings are leads, not proof.** Every detector produces statistical red
 > flags that require corroboration against records this toolkit cannot see â€”

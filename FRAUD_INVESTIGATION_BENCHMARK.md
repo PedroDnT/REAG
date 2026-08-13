@@ -117,7 +117,7 @@ This document analyzes the current fraud investigation approaches in the REAG re
 ✅ Handles private assets correctly  
 ✅ Reduces false positives from legitimate private assets  
 ✅ Provides risk levels for manual review  
-✅ Detects Banco Master pattern (LTDA ME shells)  
+✅ Detects shell-company patterns (LTDA ME shells)  
 
 **Weaknesses:**
 ❌ Requires manual verification of flagged private assets  
@@ -127,7 +127,7 @@ This document analyzes the current fraud investigation approaches in the REAG re
 **Use Cases:**
 - Comprehensive asset validation
 - Distinguishing real fraud from illiquid assets
-- Banco Master-style scheme detection
+- Shell-company scheme detection
 
 **Performance Benchmark:**
 - **Precision:** ~85% (fewer false positives than basic)
@@ -141,7 +141,7 @@ This document analyzes the current fraud investigation approaches in the REAG re
 
 ### 4. Fraud Schemes Detection (`src/analyzers/fraud_schemes.py`)
 
-**Description:** Detects specific fraud patterns based on real-world cases (Banco Master, Madoff, etc.).
+**Description:** Detects specific fraud patterns based on documented real-world cases.
 
 **Methods Implemented:**
 - Circular flow detection (same admin funds investing in each other)
@@ -163,7 +163,7 @@ This document analyzes the current fraud investigation approaches in the REAG re
 
 **Use Cases:**
 - Investigating suspected administrators
-- Detecting Banco Master-style schemes
+- Detecting circular-flow schemes
 - Deep dive investigations
 
 **Performance Benchmark:**
@@ -363,7 +363,7 @@ class NetworkAnalyzer:
 - **Cycles:** Circular flows?
 
 **Use Cases:**
-- Mapping fraud networks (Banco Master had 36 entities)
+- Mapping fraud networks (documented cases have spanned 36+ entities)
 - Finding hidden relationships
 - Detecting coordinated schemes
 
@@ -534,8 +534,8 @@ class UnifiedFraudScorer:
    - Taylor, S. J., & Letham, B. (2018). "Forecasting at scale" (Prophet)
    - ARIMA for financial time series
 
-5. **Banco Master Case:**
-   - Central Bank investigation reports (2025)
+5. **Brazilian fund-industry fraud case (2025):**
+   - Central Bank investigation reports
    - R$ 11.5 billion fraud involving 36 shell companies
 
 ---
@@ -545,7 +545,7 @@ class UnifiedFraudScorer:
 **Current Strengths:**
 - Good coverage of known fraud patterns
 - Fast screening capabilities
-- Based on real fraud cases (Banco Master)
+- Based on documented real fraud cases
 
 **Key Gaps:**
 - No learning capability (cannot adapt to new patterns)
