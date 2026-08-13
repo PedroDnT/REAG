@@ -478,7 +478,7 @@ class FraudSchemeDetector:
 
         # Resumo
         logger.info("=" * 70)
-        logger.info("RESUMO DE ESQUEMAS DETECTADOS")
+        logger.info("RESUMO DE PADROES CANDIDATOS")
         logger.info("=" * 70)
 
         logger.info(f"1. Fluxo Circular:          {len(circular)} casos")
@@ -487,14 +487,13 @@ class FraudSchemeDetector:
         logger.info(f"4. Redes de Shells:          {len(shells)} casos")
 
         total_schemes = len(circular) + len(layered) + len(inflation) + len(shells)
-        logger.warning(f"TOTAL DE ESQUEMAS:        {total_schemes}")
+        logger.warning(f"TOTAL DE LEADS:           {total_schemes}")
 
         if total_schemes > 0:
-            logger.warning("PADRAO BANCO MASTER DETECTADO!")
-            logger.warning("    Multiplos esquemas indicam fraude sistemica.")
-            logger.warning("    Recomenda-se investigacao imediata.")
+            logger.warning("Padroes candidatos requerem corroboracao.")
+            logger.warning("    Um lead isolado nao demonstra fraude ou vinculo a caso conhecido.")
         else:
-            logger.info("Nenhum esquema de fraude obvio detectado")
+            logger.info("Nenhum padrao candidato detectado")
 
         return {
             'circular_flow': circular,

@@ -303,6 +303,17 @@ class BenfordLawAnalyzer:
         logger.info("Analyzing funds for Benford's Law compliance...")
 
         results = []
+        group_sizes = informe_df.groupby("CNPJ_FUNDO", sort=False).size()
+        eligible_funds = set(
+            group_sizes[group_sizes >= self.MIN_SAMPLE_SIZE].index
+        )
+        if not eligible_funds:
+            logger.info(
+                "No fund has the minimum %d observations for Benford analysis",
+                self.MIN_SAMPLE_SIZE,
+            )
+            return pd.DataFrame(columns=["fund_cnpj", "overall_fraud_risk"])
+        informe_df = informe_df[informe_df["CNPJ_FUNDO"].isin(eligible_funds)]
 
         # groupby walks each fund once; filtering the full frame per CNPJ is O(n^2).
         for fund_cnpj, fund_data in informe_df.groupby("CNPJ_FUNDO", sort=False):
