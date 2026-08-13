@@ -218,7 +218,7 @@ class TestFraudSchemeDetector:
         )
         assert isinstance(result, pd.DataFrame)
 
-    def test_circular_flow_detects_same_admin_fund_holding(self):
+    def test_circular_flow_requires_reciprocal_holdings(self):
         from src.analyzers.fraud_schemes import FraudSchemeDetector
 
         cadastro = pd.DataFrame({
@@ -226,19 +226,37 @@ class TestFraudSchemeDetector:
             "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1", "ADMIN_2"],
         })
         cda = pd.DataFrame({
-            "CNPJ_FUNDO": ["FUND_B", "FUND_C"],
-            "CD_ATIVO": ["FUND_A", "FUND_A"],
-            "VL_MERCADO": [100.0, 50.0],
-            "QT_POS": [1.0, 1.0],
-            "DT_COMPTC": ["2024-01-31", "2024-01-31"],
+            "CNPJ_FUNDO": ["FUND_B", "FUND_A", "FUND_C"],
+            "CD_ATIVO": ["FUND_A", "FUND_B", "FUND_A"],
+            "VL_MERCADO": [100.0, 80.0, 50.0],
+            "QT_POS": [1.0, 1.0, 1.0],
+            "DT_COMPTC": ["2024-01-31"] * 3,
         })
         result = FraudSchemeDetector().detect_circular_flow(
             make_sample_informe(), cda, cadastro
         )
         assert len(result) == 1
-        assert result.iloc[0]["fund_as_asset"] == "FUND_A"
-        assert result.iloc[0]["held_by_funds"] == ["FUND_B"]
-        assert result.iloc[0]["total_value"] == 150.0
+        assert {result.iloc[0]["fund_as_asset"], *result.iloc[0]["held_by_funds"]} == {
+            "FUND_A", "FUND_B"
+        }
+        assert result.iloc[0]["total_value"] == 180.0
+        assert result.iloc[0]["severity"] == "HIGH"
+
+    def test_one_way_same_admin_holding_is_not_called_circular(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A", "FUND_B"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A"],
+            "CD_ATIVO": ["FUND_B"],
+            "VL_MERCADO": [100.0],
+        })
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        assert result.empty
 
     def test_circular_flow_scales_without_per_fund_cda_scans(self):
         """Regression: the old loop filtered the full CDA once per fund."""
@@ -260,6 +278,8 @@ class TestFraudSchemeDetector:
         })
         cda.loc[0, "CD_ATIVO"] = "F0001"
         cda.loc[0, "CNPJ_FUNDO"] = "F0000"
+        cda.loc[1, "CD_ATIVO"] = "F0000"
+        cda.loc[1, "CNPJ_FUNDO"] = "F0001"
 
         started = time.perf_counter()
         result = FraudSchemeDetector().detect_circular_flow(

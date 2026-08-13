@@ -193,7 +193,11 @@ class PeerComparisonAnalyzer:
             peer_variance = (
                 peer_sum_sq - np.square(peer_sum) / peer_count
             ) / (peer_count - 1)
-            peer_std = np.sqrt(peer_variance.clip(lower=0))
+            peer_std = np.sqrt(
+                pd.to_numeric(peer_variance, errors="coerce")
+                .astype(float)
+                .clip(lower=0)
+            )
 
             targets[f"peer_avg_{column}"] = peer_mean
             targets[f"{column}_zscore"] = (
