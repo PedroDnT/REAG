@@ -178,3 +178,37 @@ This document provides concrete, repeatable guidance for automated agents operat
 
 
 If you want me to tailor this to your exact stack, let me know what languages and tools are in scope, and I’ll refine the commands and conventions accordingly.
+
+
+## Cursor Cloud specific instructions
+
+Environment: Python-only toolkit. The system interpreter is Python 3.12 (matches CI),
+but it is externally-managed (PEP 668), so dependencies live in a virtualenv at
+`/workspace/venv` created by the startup update script. There is no server, database,
+or Node build — everything runs locally against CSV/JSON/HTML files.
+
+- Activate the environment with `source venv/bin/activate`, or call tools directly
+  (`venv/bin/pytest`, `venv/bin/ruff`, `venv/bin/python`). The update script keeps
+  `requirements.txt` + `requirements-dev.txt` installed in this venv.
+- Lint/test commands are the ones in CI (`.github/workflows/ci.yml`) and the Quick
+  Start above: `ruff check .`, `pytest -q -m "not eval"`, `pytest -q -m eval`. The
+  full test + eval suites are self-contained (synthetic fixtures/mocks) and need no
+  network or external services.
+- Gotcha: the entry-point scripts `scripts/run_investigation.py` and
+  `scripts/generate_public_report.py` do `from config...`/`from src...` but do NOT add
+  the repo root to `sys.path`. Run them from `/workspace` with `PYTHONPATH=.`
+  (e.g. `PYTHONPATH=. venv/bin/python scripts/run_investigation.py ...`) or `pytest`
+  handles this automatically via `pythonpath = ["."]` in `pyproject.toml`.
+  (`scripts/build_dashboard.py` inserts its own path and does not need this.)
+- Running an investigation needs CVM-shaped CSV inputs in `data/raw/` (gitignored).
+  Real data comes from `CVMCollector` (network to `https://dados.cvm.gov.br`); for a
+  deterministic offline run, the repo's own `evals/fixtures.py` generates labeled
+  synthetic universes. Typical flow: `run_investigation.py` -> then
+  `build_dashboard.py --run reports/investigation/<run_id>` for a self-contained HTML
+  dashboard.
+- `data/raw/*`, `data/processed/*`, `reports/*` and `venv/` are gitignored; generated
+  run outputs and demo data are never committed. `public/index.html` IS tracked — do
+  not overwrite it when building demo dashboards (write to another path).
+- Optional integrations degrade gracefully when absent: the `market_data` analyzer is
+  skipped without `yfinance` (`requirements-optional.txt`), and context enrichment is
+  skipped without `EXA_API_KEY`. Neither is required for tests, evals, or a normal run.
