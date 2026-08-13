@@ -85,6 +85,16 @@ METRIC_COLUMNS = (
 
 SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
+#: Alternate severity columns, in preference order. Detectors do not agree on a
+#: single name; without this mapping the matrix grades almost every hit as blank
+#: and the page cannot sort by seriousness.
+SEVERITY_COLUMNS = ("severity", "overall_fraud_risk", "fraud_risk")
+
+#: Benford on a single CVM month has ~22 observations per fund. The chi-square
+#: test inside the analyzer itself treats n < 30 as unreliable; those rows are
+#: statistical noise, not leads, and must not fill the matrix.
+BENFORD_MIN_SAMPLE = 30
+
 
 def _trim(value: Any) -> str:
     """Render a metric for a person, not a float dump."""
@@ -95,6 +105,81 @@ def _trim(value: Any) -> str:
     if number.is_integer() and abs(number) < 1e15:
         return str(int(number))
     return f"{number:.2f}" if abs(number) >= 1000 else f"{number:.4g}"
+
+
+def _truthy_mask(series: pd.Series) -> pd.Series:
+    """Boolean mask for CSV flags stored as strings (True/False/1/0)."""
+    normalized = series.astype(str).str.strip().str.lower()
+    return normalized.isin(("true", "1", "yes", "y", "t"))
+
+
+def _prepare_findings_frame(key: str, frame: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows that are known non-leads before they enter the fund matrix.
+
+    A findings CSV is not always a list of alerts. ``peer_outliers`` writes one
+    row per compared fund, including the ones that are *not* outliers;
+    ``benford_violations`` scores every fund even when the sample is too small
+    for Benford to apply; ``phantom_assets_by_fund`` marks ordinary fund-of-fund
+    holdings as phantom. Without these filters a full-universe page reads as
+    "everything is suspicious", which trains people to ignore the real leads.
+    """
+    if frame.empty:
+        return frame
+
+    work = frame
+    if key == "peer_outliers" and "is_outlier" in work.columns:
+        work = work.loc[_truthy_mask(work["is_outlier"])]
+    elif key == "benford_violations" and "pl_sample_size" in work.columns:
+        samples = pd.to_numeric(work["pl_sample_size"], errors="coerce").fillna(0)
+        work = work.loc[samples >= BENFORD_MIN_SAMPLE]
+    elif key == "phantom_assets_by_fund" and "asset_type" in work.columns:
+        # Cotas de outros fundos are the normal structure of a FIC, not a phantom
+        # security. Keep listed-looking codes and manual-review rows only.
+        asset_type = work["asset_type"].astype(str).str.upper()
+        keep = asset_type.ne("FUND")
+        if "status" in work.columns:
+            keep = keep | work["status"].astype(str).str.upper().eq("NEEDS_MANUAL_REVIEW")
+        work = work.loc[keep]
+
+    return work
+
+
+def _severity_series(frame: pd.DataFrame, key: str = "") -> pd.Series:
+    """Best available severity label per row, uppercased, or empty.
+
+    Some detectors fire on patterns that are common in legitimate Brazilian
+    funds (FIC concentration, mild return smoothing). Those still appear as
+    signals, but are capped below HIGH so Priority review stays usable.
+    """
+    severity = pd.Series("", index=frame.index, dtype=str)
+    for column in SEVERITY_COLUMNS:
+        if column in frame.columns:
+            severity = frame[column].astype(str).str.strip().str.upper().replace(
+                {"NAN": "", "NONE": "", "UNKNOWN": ""}
+            )
+            break
+
+    if key == "concentration_violations":
+        # High single-name weights are the normal shape of many FICs / feeder
+        # funds. Keep the signal visible, but never in the Priority band alone.
+        severity = severity.mask(severity.isin(("HIGH", "CRITICAL")), "MEDIUM")
+        severity = severity.mask(severity.eq(""), "MEDIUM")
+    elif key == "valuation_smoothing":
+        # HIGH smoothing alerts are frequent on short windows; keep CRITICAL only
+        # in the priority band.
+        severity = severity.mask(severity.eq("HIGH"), "MEDIUM")
+    elif key == "concentration_spikes":
+        severity = severity.mask(severity.isin(("HIGH", "CRITICAL")), "MEDIUM")
+        severity = severity.mask(severity.eq(""), "MEDIUM")
+    elif key == "phantom_assets_by_fund" and "status" in frame.columns:
+        # Registry misses on listed codes are common; only manual-review rows
+        # stay urgent.
+        manual = frame["status"].astype(str).str.upper().eq("NEEDS_MANUAL_REVIEW")
+        severity = severity.mask(
+            (~manual) & severity.isin(("HIGH", "CRITICAL")), "MEDIUM"
+        )
+
+    return severity
 
 
 def _names_from_cadastro(summary: dict[str, Any]) -> dict[str, str]:
@@ -215,32 +300,47 @@ def load_run(run_dir: Path) -> dict[str, Any]:
             entity_level.append(key)
             continue
 
+        # Drop known non-leads before counting. The detector still "ran"; the
+        # matrix only shows rows that survive as actionable signals.
+        frame = _prepare_findings_frame(key, frame)
+
         # An empty findings file means the detector ran and flagged nobody.
         # That is a clean result for every fund, and must not be filed as
         # "not applicable" -- treating "found nothing" as "said nothing" is the
         # exact conflation this page exists to prevent.
         tests[key] = {"key": key, "rows": int(len(frame)), "signal": SIGNAL_FOR_FILE.get(key)}
-        if column is None:
+        if column is None or frame.empty:
             continue
 
         metric_col = next((c for c in METRIC_COLUMNS if c in frame.columns), None)
-        work = frame.assign(_cnpj=normalize_cnpj_series(frame[column])).dropna(subset=["_cnpj"])
-        for cnpj, group in work.groupby("_cnpj", sort=False):
-            cnpj = str(cnpj)
+        work = frame.assign(
+            _cnpj=normalize_cnpj_series(frame[column]),
+            _severity=_severity_series(frame, key),
+        ).dropna(subset=["_cnpj"])
+        if work.empty:
+            continue
+
+        work["_rank"] = work["_severity"].map(SEVERITY_RANK).fillna(0).astype(int)
+        # Worst severity and event count per fund in one pass -- a Python
+        # groupby loop over 100k+ phantom rows dominated full-universe builds.
+        ranked = work.sort_values("_rank", ascending=False)
+        first = ranked.groupby("_cnpj", sort=False, as_index=False).first()
+        events = work.groupby("_cnpj", sort=False).size()
+
+        for row in first.to_dict("records"):
+            cnpj = str(row["_cnpj"])
             fund_hits.setdefault(cnpj, set()).add(key)
-            severities = [str(v).upper() for v in group.get("severity", pd.Series(dtype=str))
-                          if isinstance(v, str)]
-            worst = max(severities, key=lambda x: SEVERITY_RANK.get(x, 0), default="")
+            severity = row["_severity"] if row["_severity"] in SEVERITY_RANK else ""
             metric = ""
             if metric_col:
-                values = group[metric_col].dropna()
-                if len(values):
-                    metric = f"{metric_col}: {_trim(values.iloc[0])}"
+                raw = row.get(metric_col)
+                if raw is not None and str(raw) not in ("", "nan", "None"):
+                    metric = f"{metric_col}: {_trim(raw)}"
             csv_detail.setdefault(cnpj, {})[key] = {
                 "test": key,
-                "severity": worst if worst in SEVERITY_RANK else "",
+                "severity": severity,
                 "metric": metric,
-                "events": int(len(group)),
+                "events": int(events.loc[cnpj]) if cnpj in events.index else 1,
             }
 
     # --- names, and the metric each brief chose (when briefs were written) ---
@@ -397,10 +497,14 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
   <dl class="tallies">
     <div><dt>Funds in scope</dt><dd>{len(data['funds'])}</dd></div>
     <div><dt>Detectors run</dt><dd>{len(data['tests'])}</dd></div>
-    <div><dt>Flagged</dt><dd>{sum(1 for f in data['funds'] if f['count'])}</dd></div>
+    <div><dt>With any signal</dt><dd>{sum(1 for f in data['funds'] if f['count'])}</dd></div>
+    <div><dt>Priority review</dt><dd>{
+        sum(1 for f in data['funds'] if SEVERITY_RANK.get(f['severity'], 0) >= 3)
+    }</dd></div>
   </dl>
 </header>
 
+{_lead_banner()}
 {_coverage_banner(data)}
 
 <main class="split">
@@ -409,7 +513,11 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
       <input id="q" type="search" autocomplete="off" spellcheck="false"
              placeholder="Search by CNPJ or fund name" aria-label="Search funds">
       <label class="only-flagged">
-        <input type="checkbox" id="only"> Flagged only
+        <input type="checkbox" id="priority" checked>
+        Priority only (HIGH / CRITICAL)
+      </label>
+      <label class="only-flagged">
+        <input type="checkbox" id="only"> Any signal
       </label>
     </div>
     <p class="result-count" id="count" role="status"></p>
@@ -419,14 +527,16 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
   <section class="detail-pane" id="detail" aria-live="polite">
     <div class="empty">
       <p>Select a fund to see what each detector reported.</p>
+      <p class="empty-note">A signal is a lead to review, not a finding of wrongdoing.</p>
     </div>
   </section>
 </main>
 
 <footer>
-  <p>Statistical red flags are leads, not proof. Every finding needs corroboration
-     against records this toolkit cannot see — subscription ledgers, transfers,
-     counterparty documentation.</p>
+  <p>Statistical red flags are leads, not proof. Most funds with a signal are
+     ultimately fine — concentration, peer deviation, and short-sample quirks are
+     common in legitimate portfolios. Corroborate anything you escalate against
+     records this toolkit cannot see (subscription ledgers, transfers, custody).</p>
 </footer>
 
 <script id="data" type="application/json">{payload}</script>
@@ -458,13 +568,26 @@ def _period_line(data: dict[str, Any]) -> str:
     return f'<strong>Filings from {start} to {end}</strong>{extra}{derived}'
 
 
+def _lead_banner() -> str:
+    """State the epistemic status of the page before any number is read."""
+    return (
+        '<p class="coverage lead">'
+        "<strong>Leads, not verdicts.</strong> "
+        "An outlier or red flag means &ldquo;worth a look,&rdquo; not "
+        "&ldquo;this fund is fraudulent.&rdquo; Start with Priority review; "
+        "most signals have an innocent explanation."
+        "</p>"
+    )
+
+
 def _coverage_banner(data: dict[str, Any]) -> str:
     """Say plainly when part of the battery did not run."""
     missing = data["failed"] + data["skipped"]
     if not missing:
         return (
             '<p class="coverage ok">Every detector ran. '
-            'A fund with no flags was checked and came back clean.</p>'
+            'A fund with no signals was checked and came back clean — '
+            'that is not the same as proven legitimate, but it is the screen clearing.</p>'
         )
     bits = []
     if data["failed"]:
@@ -475,7 +598,7 @@ def _coverage_banner(data: dict[str, Any]) -> str:
                     + ", ".join(f"<code>{html.escape(a)}</code>" for a in data["skipped"]))
     return (
         '<p class="coverage warn">Incomplete coverage — ' + "; ".join(bits) +
-        ". Those detectors report nothing either way; absence of a flag from them "
+        ". Those detectors report nothing either way; absence of a signal from them "
         "is not a clean result.</p>"
     )
 
@@ -560,7 +683,10 @@ code,.mono,.cnpj,.metric{
 }
 .coverage.ok{color:var(--clean); background:var(--clean-soft)}
 .coverage.warn{color:var(--medium); background:var(--sunken)}
+.coverage.lead{color:var(--ink); background:var(--accent-soft)}
+.coverage.lead strong{font-weight:650}
 .coverage code{font-size:.82em}
+.empty-note{margin:8px 0 0; color:var(--ink-faint); font-size:.9rem}
 
 .split{
   display:grid; grid-template-columns:minmax(300px,400px) 1fr;
@@ -734,7 +860,9 @@ _SCRIPT = r"""
   var detailEl = document.getElementById('detail');
   var qEl = document.getElementById('q');
   var onlyEl = document.getElementById('only');
+  var priorityEl = document.getElementById('priority');
   var selected = null;
+  var SEV_RANK = {LOW:1, MEDIUM:2, HIGH:3, CRITICAL:4};
 
   function esc(s){
     return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
@@ -743,7 +871,7 @@ _SCRIPT = r"""
   }
   function label(key){ return key.replace(/_/g,' '); }
 
-  // What the flag means, what would explain it innocently, what to check next.
+  // What the signal means, what would explain it innocently, what to check next.
   // Collapsed by default: the matrix is for scanning, this is for deciding.
   function explain(key){
     var e = D.explanations[key];
@@ -768,11 +896,20 @@ _SCRIPT = r"""
            (f.name && f.name.toLowerCase().indexOf(q) !== -1);
   }
 
+  function passesFilters(f){
+    var priorityOnly = priorityEl && priorityEl.checked;
+    var anySignal = onlyEl && onlyEl.checked;
+    if (priorityOnly) return (SEV_RANK[f.severity] || 0) >= 3;
+    if (anySignal) return f.count > 0;
+    return true;
+  }
+
   function renderList(){
     var q = qEl.value.trim().toLowerCase().replace(/[.\-\/]/g,'');
-    var flaggedOnly = onlyEl.checked;
+    var filtered = priorityEl && priorityEl.checked;
+    var anySignal = onlyEl && onlyEl.checked;
     var rows = D.funds.filter(function(f){
-      return matches(f, q) && (!flaggedOnly || f.count > 0);
+      return matches(f, q) && passesFilters(f);
     });
 
     var total = rows.length;
@@ -784,7 +921,7 @@ _SCRIPT = r"""
 
     countEl.textContent = (capped ? 'showing ' + CAP + ' of ' + total : total) +
       (total === 1 ? ' fund' : ' funds') +
-      (q || flaggedOnly ? ' matching' : '');
+      (q || filtered || anySignal ? ' matching' : '');
 
     if (!total){
       listEl.innerHTML = '<li class="no-hits"><p class="empty" style="padding:14px 20px">' +
@@ -827,9 +964,9 @@ _SCRIPT = r"""
           '</li>';
       }
       if (f.hits.indexOf(key) !== -1){
-        // Flagged by the CSV but no brief line -- still a hit, shown without a metric.
+        // Present in findings but no severity/metric line yet.
         return '<li class="test is-fired"><div class="test-name"><span>' +
-          esc(label(key)) + '</span><span class="chip LOW">flagged</span></div></li>';
+          esc(label(key)) + '</span><span class="chip LOW">signal</span></div></li>';
       }
       return '<li class="test is-clean"><div class="test-name"><span>' + esc(label(key)) +
         '</span><span class="chip clean">clean</span></div></li>';
@@ -847,8 +984,8 @@ _SCRIPT = r"""
         '<p class="cnpj">' + esc(f.display) + '</p>' +
         (f.count
           ? '<span class="verdict flagged">' + f.count + ' of ' + testKeys.length +
-            ' detectors flagged this fund</span>'
-          : '<span class="verdict clear">No detector flagged this fund</span>') +
+            ' detectors raised a signal — review, do not treat as proof</span>'
+          : '<span class="verdict clear">No detector raised a signal for this fund</span>') +
       '</div>' +
       '<ul class="matrix">' + cards.join('') + '</ul>' +
       (unrunCards.length
@@ -870,10 +1007,21 @@ _SCRIPT = r"""
     if (btn) renderDetail(btn.getAttribute('data-cnpj'));
   });
   qEl.addEventListener('input', renderList);
-  onlyEl.addEventListener('change', renderList);
+  if (onlyEl) onlyEl.addEventListener('change', function(){
+    if (onlyEl.checked && priorityEl) priorityEl.checked = false;
+    renderList();
+  });
+  if (priorityEl) priorityEl.addEventListener('change', function(){
+    if (priorityEl.checked && onlyEl) onlyEl.checked = false;
+    renderList();
+  });
 
   renderList();
-  if (D.funds.length && D.funds[0].count) renderDetail(D.funds[0].cnpj);
+  if (D.funds.length){
+    var first = D.funds.filter(function(f){ return (SEV_RANK[f.severity] || 0) >= 3; })[0]
+      || D.funds[0];
+    if (first && first.count) renderDetail(first.cnpj);
+  }
 })();
 """
 
@@ -900,9 +1048,10 @@ def main(argv: list[str] | None = None) -> int:
     output.write_text(render(data, fragment=args.fragment), encoding="utf-8")
 
     flagged = sum(1 for f in data["funds"] if f["count"])
+    priority = sum(1 for f in data["funds"] if SEVERITY_RANK.get(f["severity"], 0) >= 3)
     logger.info(
-        "%s — %d funds (%d flagged), %d detectors, %d not run -> %s",
-        data["run_id"], len(data["funds"]), flagged, len(data["tests"]),
+        "%s — %d funds (%d with signals, %d priority), %d detectors, %d not run -> %s",
+        data["run_id"], len(data["funds"]), flagged, priority, len(data["tests"]),
         len(data["skipped"]) + len(data["failed"]), output,
     )
     return 0
