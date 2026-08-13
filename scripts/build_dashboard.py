@@ -655,6 +655,7 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
         "<!doctype html>\n<html lang=\"en\">\n<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        "<link rel=\"icon\" href=\"data:,\">\n"
         f"<title>Fund screening — {html.escape(str(data['run_id']))}</title>\n"
         f"<style>{_squeeze(_STYLE)}</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n"
     )
