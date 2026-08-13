@@ -250,3 +250,57 @@ class TestScale:
 
         assert len(result) == 10
         assert set(result["direction"]) == {"OVERVALUATION"}
+
+
+class TestConsensusPrefilterScales:
+    """Groups too small for a consensus are dropped before the Python loop.
+
+    Without the prefilter the loop ran a nested pandas groupby on every
+    asset-date pair just to find fewer than three holders. Most assets are held
+    by one or two funds, so on a real CVM month that was 144,847 groups where
+    only a few thousand could produce anything, and a full run never finished.
+    The filter must not change a single result.
+    """
+
+    def _analyzer(self):
+        from config.settings import Config
+        return CrossFundPriceDivergenceAnalyzer(config=Config())
+
+    def _cda(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_holder_count_is_evaluated_per_date_not_per_asset(self):
+        """The subtle case the prefilter must get right.
+
+        One asset can clear the threshold on one date and miss it on another.
+        Counting holders per asset instead of per asset-date would either drop a
+        comparable date or readmit an incomparable one.
+        """
+        rows = []
+        # 2024-01-01: three funds hold it, one of them mismarked -> comparable.
+        for cnpj, price in (("111", 100.0), ("222", 100.0), ("333", 500.0)):
+            rows.append({"CNPJ_FUNDO": cnpj, "CD_ATIVO": "CRI_1",
+                         "DT_COMPTC": pd.Timestamp("2024-01-01"),
+                         "QT_POS": 10.0, "VL_MERCADO": price * 10,
+                         "CD_ATIVO_FONTE": "CD_ATIVO"})
+        # 2024-02-01: only two funds -> no consensus, must yield nothing.
+        for cnpj, price in (("111", 100.0), ("222", 900.0)):
+            rows.append({"CNPJ_FUNDO": cnpj, "CD_ATIVO": "CRI_1",
+                         "DT_COMPTC": pd.Timestamp("2024-02-01"),
+                         "QT_POS": 10.0, "VL_MERCADO": price * 10,
+                         "CD_ATIVO_FONTE": "CD_ATIVO"})
+
+        result = self._analyzer().analyze(self._cda(rows))
+        assert not result.empty, "the three-holder date should still be compared"
+        dates = set(result["DT_COMPTC"])
+        assert dates == {pd.Timestamp("2024-01-01")}, (
+            "only the date with enough holders may produce findings"
+        )
+
+    def test_a_universe_with_no_shared_assets_returns_empty(self):
+        rows = [{"CNPJ_FUNDO": str(i), "CD_ATIVO": f"UNIQUE_{i}",
+                 "DT_COMPTC": pd.Timestamp("2024-01-01"), "QT_POS": 10.0,
+                 "VL_MERCADO": 1000.0, "CD_ATIVO_FONTE": "CD_ATIVO"}
+                for i in range(50)]
+        result = self._analyzer().analyze(self._cda(rows))
+        assert result.empty

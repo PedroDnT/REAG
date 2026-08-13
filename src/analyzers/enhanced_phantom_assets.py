@@ -336,22 +336,30 @@ class EnhancedPhantomAssetDetector:
         # Posicoes sem codigo de ativo nao sao analisaveis por ativo, e um NA
         # aqui e pior que inutil: `cda_df['CD_ATIVO'] == NA` nao casa com nada,
         # entao o .iloc[0] abaixo estourava IndexError.
-        unique_assets = cda_df['CD_ATIVO'].dropna().unique()
+        coded = cda_df[cda_df['CD_ATIVO'].notna()]
+        logger.info(f"Analisando {coded['CD_ATIVO'].nunique():,} ativos unicos...")
 
-        logger.info(f"Analisando {len(unique_assets):,} ativos unicos...")
+        # Uma passagem agrupada, nao duas varreduras por ativo. O laco anterior
+        # filtrava o frame inteiro duas vezes para cada codigo distinto: com
+        # 152 mil ativos sobre 582 mil linhas isso e da ordem de 88 bilhoes de
+        # comparacoes, e um mes completo da CVM simplesmente nunca terminava.
+        # drop_duplicates(keep='first') reproduz exatamente o .iloc[0] antigo.
+        first_rows = coded.drop_duplicates(subset='CD_ATIVO', keep='first').set_index('CD_ATIVO')
+        grouped = coded.groupby('CD_ATIVO', sort=False)
+        totals = (grouped['VL_MERCADO'].sum() if 'VL_MERCADO' in coded.columns
+                  else pd.Series(dtype=float))
+        holders = (grouped['CNPJ_FUNDO'].nunique() if 'CNPJ_FUNDO' in coded.columns
+                   else pd.Series(dtype=int))
 
-        for asset_code in unique_assets:
-            # Pegar informações adicionais
-            asset_data = cda_df[cda_df['CD_ATIVO'] == asset_code].iloc[0].to_dict()
+        for asset_code, row in first_rows.iterrows():
+            asset_data = row.to_dict()
+            asset_data['CD_ATIVO'] = asset_code
 
             # Validar
             validation = self.enhanced_validate_asset(asset_code, asset_data)
 
             # Categorizar por risco
             if validation['fraud_risk'] in ['CRITICAL', 'HIGH']:
-                # Agregar informações
-                holdings = cda_df[cda_df['CD_ATIVO'] == asset_code]
-
                 results.append({
                     'asset_code': asset_code,
                     'asset_type': validation['asset_type'],
@@ -362,8 +370,8 @@ class EnhancedPhantomAssetDetector:
                     'issuer': validation.get('issuer'),
                     'red_flags': ', '.join(validation.get('red_flags', [])),
                     'reason': validation['reason'],
-                    'total_value': holdings['VL_MERCADO'].sum() if 'VL_MERCADO' in holdings.columns else 0,
-                    'num_funds_holding': holdings['CNPJ_FUNDO'].nunique() if 'CNPJ_FUNDO' in holdings.columns else 0,
+                    'total_value': float(totals.get(asset_code, 0) or 0),
+                    'num_funds_holding': int(holders.get(asset_code, 0) or 0),
                     'validation_method': validation['validation_method']
                 })
 
