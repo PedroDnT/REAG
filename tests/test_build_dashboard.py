@@ -220,3 +220,92 @@ class TestMetricsSurviveWithoutBriefs:
         fund = next(f for f in load_run(stripped)["funds"] if f["cnpj"] == FUND_A)
         assert fund["severity"] == "HIGH"
         assert fund["detail"]["runs"]["metric"] == "RUN_LENGTH: 7"
+
+
+class TestNonLeadsAreFilteredFromTheMatrix:
+    """Full-universe CSVs mix alerts with noise; the page must not treat both as hits."""
+
+    def test_peer_rows_that_are_not_outliers_do_not_flag_a_fund(self, run_dir):
+        (run_dir / "findings" / "peer_outliers.csv").write_text(
+            "CNPJ_FUNDO,is_outlier,sharpe_zscore,fraud_flag\n"
+            f"{FUND_A},False,0.1,\n"
+            f"{FUND_B},True,4.2,RETURNS_TOO_HIGH\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {f["cnpj"]: f for f in data["funds"]}
+        assert "peer_outliers" not in by_cnpj[FUND_A]["hits"]
+        assert "peer_outliers" in by_cnpj[FUND_B]["hits"]
+
+    def test_undersampled_benford_rows_are_dropped(self, run_dir):
+        (run_dir / "findings" / "benford_violations.csv").write_text(
+            "fund_cnpj,pl_sample_size,overall_fraud_risk,pl_mad\n"
+            f"{FUND_A},21,CRITICAL,0.2\n"
+            f"{FUND_B},120,HIGH,0.05\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {f["cnpj"]: f for f in data["funds"]}
+        assert "benford_violations" not in by_cnpj[FUND_A]["hits"]
+        assert "benford_violations" in by_cnpj[FUND_B]["hits"]
+        assert by_cnpj[FUND_B]["detail"]["benford_violations"]["severity"] == "HIGH"
+
+    def test_fund_of_fund_phantom_rows_are_dropped(self, run_dir):
+        (run_dir / "findings" / "phantom_assets_by_fund.csv").write_text(
+            "CNPJ_FUNDO,asset_code,asset_type,status,fraud_risk,PCT_CARTEIRA\n"
+            f"{FUND_A},OTHERFUND,FUND,PHANTOM,CRITICAL,40\n"
+            f"{FUND_B},FAKE4,STOCK,PHANTOM,HIGH,12\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {f["cnpj"]: f for f in data["funds"]}
+        assert "phantom_assets_by_fund" not in by_cnpj[FUND_A]["hits"]
+        assert "phantom_assets_by_fund" in by_cnpj[FUND_B]["hits"]
+        # Ordinary phantom hits stay visible but not Priority (HIGH/CRITICAL).
+        assert by_cnpj[FUND_B]["detail"]["phantom_assets_by_fund"]["severity"] == "MEDIUM"
+
+    def test_ordinary_concentration_is_not_priority(self, run_dir):
+        (run_dir / "findings" / "concentration_violations.csv").write_text(
+            "CNPJ_FUNDO,top1_pct,severity,fraud_flags\n"
+            f"{FUND_A},99.9,CRITICAL,EXTREME_CONCENTRATION\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["detail"]["concentration_violations"]["severity"] == "MEDIUM"
+
+
+class TestLeadsFraming:
+    def test_page_states_leads_are_not_verdicts(self, run_dir):
+        page = render(load_run(run_dir))
+        assert "Leads, not verdicts" in page
+        assert "Investigate" in page
+        assert "Review+" in page
+        assert "All reporting funds" in page
+        assert "no signal" in page
+
+    def test_two_strong_evidence_families_create_investigate_tier(self, run_dir):
+        (run_dir / "findings" / "reconciliation_gaps.csv").write_text(
+            f"CNPJ_FUNDO,gap_pct,severity\n{FUND_A},55,CRITICAL\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["tier"] == "INVESTIGATE"
+        assert fund["family_count"] == 2
+
+    def test_full_universe_includes_reporting_funds_without_findings(self, run_dir):
+        informe = run_dir / "informe.csv"
+        informe.write_text(
+            "CNPJ_FUNDO;DT_COMPTC\n"
+            f"{FUND_A};2026-06-01\n"
+            "99888777000166;2026-06-01\n"
+        )
+        summary = json.loads((run_dir / "summary.json").read_text())
+        summary["args"] = {"informe": str(informe)}
+        summary["scope"]["selected_cnpjs"] = []
+        (run_dir / "summary.json").write_text(json.dumps(summary))
+
+        data = load_run(run_dir)
+        by_cnpj = {fund["cnpj"]: fund for fund in data["funds"]}
+        assert data["reporting_funds"] == 2
+        assert by_cnpj["99888777000166"]["tier"] == "NO_SIGNAL"
+        assert by_cnpj["99888777000166"]["reported"] is True
+
+    def test_deep_link_renders_a_no_signal_fund(self, run_dir):
+        page = render(load_run(run_dir))
+        assert "if (first) renderDetail(first.cnpj)" in page
+        assert "if (first && first.count)" not in page

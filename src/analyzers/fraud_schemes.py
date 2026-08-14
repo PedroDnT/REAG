@@ -89,34 +89,58 @@ class FraudSchemeDetector:
 
         holdings["holder_admin"] = holdings["CNPJ_FUNDO"].map(fund_to_admin)
         holdings["asset_admin"] = holdings["CD_ATIVO"].map(fund_to_admin)
-        circular = holdings[
+        related_holdings = holdings[
             holdings["holder_admin"].notna()
             & holdings["asset_admin"].notna()
             & (holdings["holder_admin"] == holdings["asset_admin"])
             & (holdings["CNPJ_FUNDO"] != holdings["CD_ATIVO"])
         ]
-        if circular.empty:
+        if related_holdings.empty:
             logger.info("Nenhum fluxo circular detectado")
             return pd.DataFrame()
 
-        # total_value matches the pre-vectorized detector: sum over every holder
-        # of the asset, not only same-admin circular edges.
-        total_by_asset = holdings.groupby("CD_ATIVO")["VL_MERCADO"].sum()
+        # Same-administrator fund-of-fund holdings are common and are not
+        # circular by themselves. Require a reciprocal edge (A owns B and B
+        # owns A) before emitting a lead.
+        edges = (
+            related_holdings.groupby(
+                ["holder_admin", "CNPJ_FUNDO", "CD_ATIVO"], as_index=False
+            )["VL_MERCADO"]
+            .sum()
+            .rename(columns={"VL_MERCADO": "forward_value"})
+        )
+        reverse = edges.rename(columns={
+            "CNPJ_FUNDO": "CD_ATIVO",
+            "CD_ATIVO": "CNPJ_FUNDO",
+            "forward_value": "reverse_value",
+        })
+        reciprocal = edges.merge(
+            reverse,
+            on=["holder_admin", "CNPJ_FUNDO", "CD_ATIVO"],
+            how="inner",
+        )
+        if reciprocal.empty:
+            logger.info("Nenhum fluxo circular reciproco detectado")
+            return pd.DataFrame()
 
+        reciprocal["pair"] = reciprocal.apply(
+            lambda row: tuple(sorted((row["CNPJ_FUNDO"], row["CD_ATIVO"]))),
+            axis=1,
+        )
+        reciprocal = reciprocal.drop_duplicates(["holder_admin", "pair"])
         circular_flows = []
-        for (admin_cnpj, fund_cnpj), group in circular.groupby(
-            ["asset_admin", "CD_ATIVO"], sort=False
-        ):
-            holders = group["CNPJ_FUNDO"].unique().tolist()
+        for row in reciprocal.itertuples(index=False):
+            fund_a, fund_b = row.pair
             circular_flows.append({
-                "admin_cnpj": admin_cnpj,
-                "fund_as_asset": fund_cnpj,
-                "held_by_funds": holders,
-                "num_circular_connections": len(holders),
-                "total_value": float(total_by_asset.get(fund_cnpj, 0.0)),
-                "fraud_pattern": "CIRCULAR_FUND_INVESTMENT",
-                "severity": "CRITICAL",
-                "banco_master_similarity": "HIGH",
+                "admin_cnpj": row.holder_admin,
+                "fund_as_asset": fund_b,
+                "held_by_funds": [fund_a],
+                "num_circular_connections": 2,
+                "cycle_length": 2,
+                "total_value": float(row.forward_value + row.reverse_value),
+                "fraud_pattern": "RECIPROCAL_FUND_INVESTMENT",
+                "severity": "HIGH",
+                "confidence": "MEDIUM",
             })
 
         result_df = pd.DataFrame(circular_flows)
@@ -454,7 +478,7 @@ class FraudSchemeDetector:
 
         # Resumo
         logger.info("=" * 70)
-        logger.info("RESUMO DE ESQUEMAS DETECTADOS")
+        logger.info("RESUMO DE PADROES CANDIDATOS")
         logger.info("=" * 70)
 
         logger.info(f"1. Fluxo Circular:          {len(circular)} casos")
@@ -463,14 +487,13 @@ class FraudSchemeDetector:
         logger.info(f"4. Redes de Shells:          {len(shells)} casos")
 
         total_schemes = len(circular) + len(layered) + len(inflation) + len(shells)
-        logger.warning(f"TOTAL DE ESQUEMAS:        {total_schemes}")
+        logger.warning(f"TOTAL DE LEADS:           {total_schemes}")
 
         if total_schemes > 0:
-            logger.warning("PADRAO BANCO MASTER DETECTADO!")
-            logger.warning("    Multiplos esquemas indicam fraude sistemica.")
-            logger.warning("    Recomenda-se investigacao imediata.")
+            logger.warning("Padroes candidatos requerem corroboracao.")
+            logger.warning("    Um lead isolado nao demonstra fraude ou vinculo a caso conhecido.")
         else:
-            logger.info("Nenhum esquema de fraude obvio detectado")
+            logger.info("Nenhum padrao candidato detectado")
 
         return {
             'circular_flow': circular,

@@ -47,6 +47,7 @@ class BenfordLawAnalyzer:
         8: 0.051,  # 5.1%
         9: 0.046   # 4.6%
     }
+    MIN_SAMPLE_SIZE = 30
 
     def __init__(self, alpha: float = 0.05):
         """
@@ -220,6 +221,22 @@ class BenfordLawAnalyzer:
                 'error': 'No valid values to analyze'
             }
 
+        if sample_size < self.MIN_SAMPLE_SIZE:
+            return {
+                'series_name': series_name,
+                'sample_size': sample_size,
+                'chi_square': 0.0,
+                'p_value': 1.0,
+                'is_significant': False,
+                'mad': None,
+                'conformity': 'INSUFFICIENT_SAMPLE',
+                'fraud_risk': 'UNKNOWN',
+                'reason': (
+                    f'Benford analysis requires at least {self.MIN_SAMPLE_SIZE} '
+                    'valid observations'
+                ),
+            }
+
         # Calculate observed distribution
         observed = self.calculate_observed_distribution(first_digits)
 
@@ -286,6 +303,17 @@ class BenfordLawAnalyzer:
         logger.info("Analyzing funds for Benford's Law compliance...")
 
         results = []
+        group_sizes = informe_df.groupby("CNPJ_FUNDO", sort=False).size()
+        eligible_funds = set(
+            group_sizes[group_sizes >= self.MIN_SAMPLE_SIZE].index
+        )
+        if not eligible_funds:
+            logger.info(
+                "No fund has the minimum %d observations for Benford analysis",
+                self.MIN_SAMPLE_SIZE,
+            )
+            return pd.DataFrame(columns=["fund_cnpj", "overall_fraud_risk"])
+        informe_df = informe_df[informe_df["CNPJ_FUNDO"].isin(eligible_funds)]
 
         # groupby walks each fund once; filtering the full frame per CNPJ is O(n^2).
         for fund_cnpj, fund_data in informe_df.groupby("CNPJ_FUNDO", sort=False):
