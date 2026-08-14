@@ -154,6 +154,28 @@ def _prepare_findings_frame(key: str, frame: pd.DataFrame) -> pd.DataFrame:
     work = frame
     if key == "peer_outliers" and "is_outlier" in work.columns:
         work = work.loc[_truthy_mask(work["is_outlier"])]
+        if "fund_volatility" in work.columns:
+            vol = pd.to_numeric(work["fund_volatility"], errors="coerce").fillna(0)
+            sharpe_z = pd.to_numeric(
+                work["sharpe_zscore"] if "sharpe_zscore" in work.columns else 0,
+                errors="coerce",
+            ).abs().fillna(0)
+            return_z = pd.to_numeric(
+                work["return_zscore"] if "return_zscore" in work.columns else 0,
+                errors="coerce",
+            ).abs().fillna(0)
+            work = work.loc[(return_z > 3) | ((vol >= 1e-3) & (sharpe_z > 3))]
+        if "peer_avg_return" in work.columns:
+            peer_ret = pd.to_numeric(work["peer_avg_return"], errors="coerce")
+            work = work.loc[peer_ret.replace([float("inf"), float("-inf")], pd.NA).notna()]
+    elif key == "layered_funds":
+        holder = pd.to_numeric(work.get("holder_avg_daily_return"), errors="coerce") \
+            if "holder_avg_daily_return" in work.columns else None
+        held = pd.to_numeric(work.get("held_avg_daily_return"), errors="coerce") \
+            if "held_avg_daily_return" in work.columns else None
+        if holder is not None and held is not None:
+            finite = holder.between(-1e12, 1e12) & held.between(-1e12, 1e12)
+            work = work.loc[finite & ((holder > 5) | (held > 5))]
     elif key == "benford_violations" and "pl_sample_size" in work.columns:
         samples = pd.to_numeric(work["pl_sample_size"], errors="coerce").fillna(0)
         work = work.loc[samples >= BENFORD_MIN_SAMPLE]

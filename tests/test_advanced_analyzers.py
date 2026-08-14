@@ -347,6 +347,46 @@ class TestFraudSchemeDetector:
         )
         assert isinstance(result, pd.DataFrame)
 
+    def test_layered_funds_drops_inf_and_ordinary_daily_returns(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        detector = FraudSchemeDetector()
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["11111111000191", "22222222000172", "33333333000153", "44444444000134"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1", "ADMIN_1", "ADMIN_1"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["11111111000191", "33333333000153"],
+            "CD_ATIVO": ["22222222000172", "44444444000134"],
+            "VL_MERCADO": [100.0, 100.0],
+        })
+        detector._mean_daily_quota_return_by_fund = lambda _frame: pd.Series({
+            "11111111000191": 0.2,
+            "22222222000172": float("inf"),
+            "33333333000153": 0.3,
+            "44444444000134": 1.16,
+        })
+        assert detector.detect_layered_funds(cda, make_sample_informe(), cadastro).empty
+
+    def test_layered_funds_keeps_miraculous_same_admin_return(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        detector = FraudSchemeDetector()
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["11111111000191", "22222222000172"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["11111111000191"],
+            "CD_ATIVO": ["22222222000172"],
+            "VL_MERCADO": [100.0],
+        })
+        detector._mean_daily_quota_return_by_fund = lambda _frame: pd.Series({
+            "11111111000191": 0.4,
+            "22222222000172": 8.8,
+        })
+        result = detector.detect_layered_funds(cda, make_sample_informe(), cadastro)
+        assert len(result) == 1
+        assert result.iloc[0]["held_fund"] == "22222222000172"
+
     def test_asset_inflation_returns_dataframe(self):
         from src.analyzers.fraud_schemes import FraudSchemeDetector
         detector = FraudSchemeDetector()
@@ -426,6 +466,32 @@ class TestPeerComparisonAnalyzer:
         assert result.iloc[0]["is_outlier"] == True  # noqa: E712
         assert result.iloc[0]["fraud_flag"] == "RETURNS_TOO_HIGH"
         assert result.iloc[0]["severity"] in ("HIGH", "CRITICAL")
+
+    def test_compare_with_peers_ignores_flat_nav_sharpe(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["flat", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["MULTI"] * 7,
+            "avg_return": [0.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+            "volatility": [1e-9, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            "sharpe_ratio": [1e12, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+        })
+        result = analyzer.compare_with_peers(["flat"], metrics)
+        assert result.empty
+
+    def test_compare_with_peers_ignores_inf_category_contamination(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["ok", "boom", "p1", "p2", "p3", "p4", "p5"],
+            "category": ["OTHER"] * 7,
+            "avg_return": [0.1, float("inf"), 0.0, 0.2, -0.1, 0.05, 0.0],
+            "volatility": [1.0] * 7,
+            "sharpe_ratio": [0.1, float("inf"), 0.0, 0.2, -0.1, 0.05, 0.0],
+        })
+        result = analyzer.compare_with_peers(["ok"], metrics)
+        assert result.empty or "inf" not in set(result["peer_avg_return"].astype(str))
 
     def test_generate_peer_report_handles_outlier_summary(self):
         """Regression: report logging must use the comparison output schema."""

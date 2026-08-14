@@ -245,6 +245,25 @@ class TestNonLeadsAreFilteredFromTheMatrix:
         fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
         assert fund["detail"]["peer_outliers"]["severity"] == "CRITICAL"
         assert fund["tier"] in ("REVIEW", "INVESTIGATE")
+
+    def test_peer_inf_and_flat_nav_rows_are_dropped(self, run_dir):
+        (run_dir / "findings" / "peer_outliers.csv").write_text(
+            "CNPJ_FUNDO,is_outlier,return_zscore,sharpe_zscore,fund_volatility,peer_avg_return\n"
+            f"{FUND_A},True,0.0,-76.0,1e-9,inf\n"
+            f"{FUND_B},True,9.1,0.2,1.2,0.1\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {f["cnpj"]: f for f in data["funds"]}
+        assert "peer_outliers" not in by_cnpj[FUND_A]["hits"]
+        assert "peer_outliers" in by_cnpj[FUND_B]["hits"]
+
+    def test_layered_inf_rows_are_dropped(self, run_dir):
+        (run_dir / "findings" / "layered_funds.csv").write_text(
+            "holder_fund,held_fund,holder_avg_daily_return,held_avg_daily_return,severity\n"
+            f"{FUND_A},{FUND_B},0.2,inf,MEDIUM\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert "layered_funds" not in fund["hits"]
         (run_dir / "findings" / "benford_violations.csv").write_text(
             "fund_cnpj,pl_sample_size,overall_fraud_risk,pl_mad\n"
             f"{FUND_A},21,CRITICAL,0.2\n"
