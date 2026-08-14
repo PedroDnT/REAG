@@ -520,22 +520,29 @@ class TestPeerComparisonAnalyzer:
         assert result.empty or "inf" not in set(result["peer_avg_return"].astype(str))
 
     def test_generate_peer_report_handles_outlier_summary(self):
-        """Regression: report logging must use the comparison output schema."""
+        """Regression: outlier logging must match compare_with_peers columns.
+
+        A mocked comparison frame cannot catch a producer rename (anomaly_type
+        vs fraud_flag). Drive the real compare_with_peers output through
+        generate_peer_report so a schema mismatch raises KeyError here.
+        """
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer
         analyzer = PeerComparisonAnalyzer()
-        comparison = pd.DataFrame({
-            "CNPJ_FUNDO": ["target"],
-            "is_outlier": [True],
-            "fraud_flag": ["RETURNS_TOO_HIGH"],
-            "return_zscore": [4.2],
-            "sharpe_zscore": [3.7],
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["target", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["MULTI"] * 7,
+            "avg_return": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+            "volatility": [1.0] * 7,
+            "sharpe_ratio": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
         })
-        analyzer.calculate_fund_metrics = lambda _frame: pd.DataFrame()
-        analyzer.compare_with_peers = lambda _targets, _metrics: comparison
+        analyzer.calculate_fund_metrics = lambda _frame: metrics
         analyzer.detect_smoothed_returns = lambda _frame, _targets: pd.DataFrame()
 
-        report = analyzer.generate_peer_report(["target"], pd.DataFrame())
-        assert report["peer_comparison"].equals(comparison)
+        report = analyzer.generate_peer_report(["target", "p1"], pd.DataFrame())
+        comparison = report["peer_comparison"]
+        assert comparison["CNPJ_FUNDO"].tolist() == ["target"]
+        assert "fraud_flag" in comparison.columns
+        assert comparison.iloc[0]["fraud_flag"] == "RETURNS_TOO_HIGH"
 
     def test_detect_smoothed_returns(self):
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer
