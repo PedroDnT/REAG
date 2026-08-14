@@ -38,12 +38,14 @@ def test_explainer_generates_briefs_and_evidence(tmp_path: Path):
         "circular_flow": pd.DataFrame(
             {
                 "admin_cnpj": ["99.999.999/0001-01"],
-                "fund_as_asset": ["12.345.678/0001-90"],
-                "held_by_funds": [["11.111.111/0001-11"]],
-                "num_circular_connections": [1],
+                "CNPJ_FUNDO": ["12.345.678/0001-90"],
+                "counterparty_cnpj": ["11.111.111/0001-11"],
+                "num_circular_connections": [2],
+                "cycle_length": [2],
                 "total_value": [12_000_000.0],
+                "fraud_pattern": ["RECIPROCAL_FUND_INVESTMENT"],
                 "severity": ["CRITICAL"],
-                "banco_master_similarity": ["HIGH"],
+                "confidence": ["MEDIUM"],
             }
         ),
     }

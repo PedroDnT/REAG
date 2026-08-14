@@ -21,6 +21,14 @@ from config.constants import (
 
 logger = logging.getLogger(__name__)
 
+# Daily-return std in percent points. Below ~5 bps/day the NAV is effectively
+# flat and Sharpe is  avg / epsilon, which z-scores as a fraud lead.
+MIN_VOLATILITY_FOR_SHARPE = 0.05
+
+# CLASSE values that do not map to a real peer group. Z-scoring Sharpe against
+# 24k unrelated OTHER funds is not a comparison.
+CATCHALL_PEER_CATEGORIES = frozenset({"OTHER", "UNKNOWN"})
+
 
 class PeerComparisonAnalyzer:
     """
@@ -167,18 +175,27 @@ class PeerComparisonAnalyzer:
             return pd.DataFrame()
 
         metrics = all_metrics_df.drop_duplicates("CNPJ_FUNDO").copy()
+        value_columns = ("avg_return", "volatility", "sharpe_ratio")
+        for column in value_columns:
+            metrics[column] = pd.to_numeric(metrics[column], errors="coerce")
+        metrics = metrics.replace([np.inf, -np.inf], np.nan)
+        metrics.loc[
+            metrics["volatility"].fillna(0) < MIN_VOLATILITY_FOR_SHARPE,
+            "sharpe_ratio",
+        ] = np.nan
+
         target_set = set(target_funds)
         targets = metrics[metrics["CNPJ_FUNDO"].isin(target_set)].copy()
         if targets.empty:
             logger.info("Nenhum fundo alvo encontrado nas metricas")
             return pd.DataFrame()
 
-        value_columns = ("avg_return", "volatility", "sharpe_ratio")
         grouped = metrics.groupby("category", dropna=False)
         stats = grouped[list(value_columns)].agg(["count", "sum"])
         for column in value_columns:
             stats[(column, "sum_sq")] = grouped[column].apply(
-                lambda values: float(np.square(values.astype(float)).sum())
+                lambda values: float(np.square(values[np.isfinite(values)]).sum())
+                if values.notna().any() else 0.0
             )
         stats.columns = [f"{column}_{stat}" for column, stat in stats.columns]
         targets = targets.merge(stats, left_on="category", right_index=True, how="left")
@@ -186,9 +203,12 @@ class PeerComparisonAnalyzer:
         # Exact leave-one-out peer means/stds without rebuilding a peer frame
         # for every target fund. This changes O(targets x funds) to O(funds).
         for column in value_columns:
-            peer_count = targets[f"{column}_count"] - 1
-            peer_sum = targets[f"{column}_sum"] - targets[column]
-            peer_sum_sq = targets[f"{column}_sum_sq"] - np.square(targets[column])
+            finite = np.isfinite(targets[column].to_numpy(dtype=float, na_value=np.nan))
+            in_stats = pd.Series(finite, index=targets.index)
+            peer_count = targets[f"{column}_count"] - in_stats.astype(int)
+            value = targets[column].where(in_stats, 0.0)
+            peer_sum = targets[f"{column}_sum"] - value
+            peer_sum_sq = targets[f"{column}_sum_sq"] - np.square(value)
             peer_mean = peer_sum / peer_count
             peer_variance = (
                 peer_sum_sq - np.square(peer_sum) / peer_count
@@ -199,10 +219,10 @@ class PeerComparisonAnalyzer:
                 .clip(lower=0)
             )
 
+            zscore = (targets[column] - peer_mean) / peer_std.replace(0, np.nan)
+            zscore = zscore.where(np.isfinite(zscore), np.nan)
             targets[f"peer_avg_{column}"] = peer_mean
-            targets[f"{column}_zscore"] = (
-                (targets[column] - peer_mean) / peer_std.replace(0, np.nan)
-            ).fillna(0.0)
+            targets[f"{column}_zscore"] = zscore.fillna(0.0)
             targets[f"{column}_peer_count"] = peer_count
 
         targets = targets[targets["avg_return_peer_count"] >= 5].copy()
@@ -210,9 +230,19 @@ class PeerComparisonAnalyzer:
             logger.info("Nenhum fundo com peers suficientes para comparacao")
             return pd.DataFrame()
 
+        return_z = targets["avg_return_zscore"].abs()
+        sharpe_z = targets["sharpe_ratio_zscore"].abs()
+        named_peer_group = ~targets["category"].fillna("UNKNOWN").isin(
+            CATCHALL_PEER_CATEGORIES
+        )
+        sharpe_usable = (
+            named_peer_group
+            & (targets["volatility"].fillna(0) >= MIN_VOLATILITY_FOR_SHARPE)
+        )
         targets["is_outlier"] = (
-            targets["avg_return_zscore"].abs() > ZSCORE_THRESHOLD
-        ) | (targets["sharpe_ratio_zscore"].abs() > ZSCORE_THRESHOLD)
+            (return_z > ZSCORE_THRESHOLD)
+            | (sharpe_usable & (sharpe_z > ZSCORE_THRESHOLD))
+        )
         outliers = targets[targets["is_outlier"]].copy()
         if outliers.empty:
             logger.info("Comparacao concluida: nenhum outlier detectado")
@@ -227,6 +257,15 @@ class PeerComparisonAnalyzer:
             conditions,
             ["RETURNS_TOO_HIGH", "HIDDEN_LOSSES", "RISK_ADJUSTED_TOO_GOOD"],
             default="UNUSUAL_PEER_PROFILE",
+        )
+        z = np.maximum(
+            outliers["avg_return_zscore"].abs(),
+            outliers["sharpe_ratio_zscore"].abs(),
+        )
+        outliers["severity"] = np.select(
+            [z >= 5, z >= 4],
+            ["CRITICAL", "HIGH"],
+            default="MEDIUM",
         )
 
         result_df = pd.DataFrame({
@@ -244,6 +283,7 @@ class PeerComparisonAnalyzer:
             "sharpe_zscore": outliers["sharpe_ratio_zscore"],
             "is_outlier": True,
             "fraud_flag": outliers["fraud_flag"],
+            "severity": outliers["severity"],
         }).sort_values("return_zscore", ascending=False)
 
         logger.info(

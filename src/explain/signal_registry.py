@@ -115,12 +115,14 @@ SIGNAL_REGISTRY: dict[str, SignalDefinition] = {
         ),
         evidence_fields=(
             "admin_cnpj",
-            "fund_as_asset",
-            "held_by_funds",
+            "CNPJ_FUNDO",
+            "counterparty_cnpj",
             "num_circular_connections",
+            "cycle_length",
             "total_value",
+            "fraud_pattern",
             "severity",
-            "banco_master_similarity",
+            "confidence",
         ),
         primary_entities=("ADMINISTRATOR", "FUND"),
         next_steps=(

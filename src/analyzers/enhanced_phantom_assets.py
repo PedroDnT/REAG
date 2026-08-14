@@ -75,7 +75,7 @@ class EnhancedPhantomAssetDetector:
                 'PRIVADO NAO REGISTRADO'
             ],
             'circular_flow_indicators': [
-                'MASTER',  # Banco Master
+                'BANCO MASTER',
                 'REAG',
                 'CBSF',
                 'D MAIS',  # Fundos do esquema
@@ -210,7 +210,7 @@ class EnhancedPhantomAssetDetector:
                 red_flags.append('POSSIBLE_SHELL_COMPANY')
                 confidence = 'HIGH'
 
-            if any(pattern in issuer.upper() for pattern in self.suspicious_patterns['circular_flow_indicators']):
+            if self._issuer_matches_any(issuer, self.suspicious_patterns['circular_flow_indicators']):
                 red_flags.append('CIRCULAR_FLOW_ENTITY')
                 confidence = 'CRITICAL'
         else:
@@ -248,6 +248,18 @@ class EnhancedPhantomAssetDetector:
 
         return None
 
+    def _issuer_matches_any(self, issuer: str, patterns: list[str]) -> bool:
+        """Match known-scheme tokens as whole words, not substrings.
+
+        ``MASTER`` used to fire on every 'BlackRock Master' feeder, and
+        ``BRAVO`` on Rio Bravo CRIs.
+        """
+        text = issuer.upper()
+        return any(
+            re.search(rf"(?<![A-Z0-9]){re.escape(pattern.upper())}(?![A-Z0-9])", text)
+            for pattern in patterns
+        )
+
     def enhanced_validate_asset(self, asset_code: str, asset_info: dict = None) -> dict:
         """
         Validação aprimorada que distingue ativos públicos vs privados
@@ -274,7 +286,7 @@ class EnhancedPhantomAssetDetector:
         }
 
         # Validação para ativos PÚBLICOS
-        if classification['should_be_public']:
+        if classification['should_be_public'] is True:
             is_valid = False
             registry_complete = False
 
@@ -310,7 +322,7 @@ class EnhancedPhantomAssetDetector:
                 })
 
         # Validação para ativos PRIVADOS
-        elif not classification['should_be_public']:
+        elif classification['should_be_public'] is False:
             private_validation = self.validate_private_asset(asset_code, asset_info)
 
             result.update({
@@ -376,22 +388,23 @@ class EnhancedPhantomAssetDetector:
             # Validar
             validation = self.enhanced_validate_asset(asset_code, asset_data)
 
-            # Categorizar por risco
-            if validation['fraud_risk'] in ['CRITICAL', 'HIGH']:
-                results.append({
-                    'asset_code': asset_code,
-                    'asset_type': validation['asset_type'],
-                    'status': validation['status'],
-                    'fraud_risk': validation['fraud_risk'],
-                    'confidence': validation['confidence'],
-                    'liquidity_expectation': validation['liquidity_expectation'],
-                    'issuer': validation.get('issuer'),
-                    'red_flags': ', '.join(validation.get('red_flags', [])),
-                    'reason': validation['reason'],
-                    'total_value': float(totals.get(asset_code, 0) or 0),
-                    'num_funds_holding': int(holders.get(asset_code, 0) or 0),
-                    'validation_method': validation['validation_method']
-                })
+            if not self._should_report_asset(validation):
+                continue
+
+            results.append({
+                'asset_code': asset_code,
+                'asset_type': validation['asset_type'],
+                'status': validation['status'],
+                'fraud_risk': validation['fraud_risk'],
+                'confidence': validation['confidence'],
+                'liquidity_expectation': validation['liquidity_expectation'],
+                'issuer': validation.get('issuer'),
+                'red_flags': ', '.join(validation.get('red_flags', [])),
+                'reason': validation['reason'],
+                'total_value': float(totals.get(asset_code, 0) or 0),
+                'num_funds_holding': int(holders.get(asset_code, 0) or 0),
+                'validation_method': validation['validation_method']
+            })
 
         result_df = pd.DataFrame(results)
 
@@ -406,6 +419,14 @@ class EnhancedPhantomAssetDetector:
             logger.info(f"Breakdown por status:\n{result_df['status'].value_counts()}")
 
         return result_df
+
+    def _should_report_asset(self, validation: dict) -> bool:
+        """Persist leads, including fund-registry misses, but not cache noise."""
+        if validation.get("status") == "VALID" or validation.get("fraud_risk") == "NONE":
+            return False
+        if validation.get("status") == "NEEDS_VERIFICATION":
+            return validation.get("asset_type") == "FUND" and bool(self.valid_funds)
+        return validation.get("fraud_risk") in ("HIGH", "CRITICAL")
 
     def _load_registries(self):
         """Carrega registros (mantido para compatibilidade)"""

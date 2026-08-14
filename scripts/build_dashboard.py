@@ -37,6 +37,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.analyzers.peer_comparison import (  # noqa: E402
+    CATCHALL_PEER_CATEGORIES,
+    MIN_VOLATILITY_FOR_SHARPE,
+)
 from src.utils.cnpj_utils import normalize_cnpj, normalize_cnpj_series  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -44,7 +48,7 @@ logger = logging.getLogger(__name__)
 #: Columns that identify a fund in a findings CSV, in priority order. A file
 #: carrying none of these is keyed by something other than a fund (an issuer, a
 #: manager) and cannot take part in a per-fund matrix.
-FUND_KEY_COLUMNS = ("CNPJ_FUNDO", "fund_cnpj", "CNPJ")
+FUND_KEY_COLUMNS = ("CNPJ_FUNDO", "fund_cnpj", "CNPJ", "holder_fund")
 
 #: findings file -> the SIGNAL_REGISTRY entry that explains it. A file with no
 #: entry still appears in the matrix; it just carries no plain-language note.
@@ -106,6 +110,8 @@ SIGNAL_FAMILY = {
     "phantom_assets_by_fund": "registry",
     "quotaholder_anomalies": "ownership",
     "lifecycle_anomalies": "lifecycle",
+    "circular_flow": "network",
+    "layered_funds": "network",
 }
 
 #: Alternate severity columns, in preference order. Detectors do not agree on a
@@ -152,6 +158,37 @@ def _prepare_findings_frame(key: str, frame: pd.DataFrame) -> pd.DataFrame:
     work = frame
     if key == "peer_outliers" and "is_outlier" in work.columns:
         work = work.loc[_truthy_mask(work["is_outlier"])]
+        if "fund_volatility" in work.columns:
+            vol = pd.to_numeric(work["fund_volatility"], errors="coerce").fillna(0)
+            sharpe_z = pd.to_numeric(
+                work["sharpe_zscore"] if "sharpe_zscore" in work.columns else 0,
+                errors="coerce",
+            ).abs().fillna(0)
+            return_z = pd.to_numeric(
+                work["return_zscore"] if "return_zscore" in work.columns else 0,
+                errors="coerce",
+            ).abs().fillna(0)
+            if "category" in work.columns:
+                named_peers = ~work["category"].fillna("UNKNOWN").isin(
+                    CATCHALL_PEER_CATEGORIES
+                )
+            else:
+                named_peers = True
+            work = work.loc[
+                (return_z > 3)
+                | (named_peers & (vol >= MIN_VOLATILITY_FOR_SHARPE) & (sharpe_z > 3))
+            ]
+        if "peer_avg_return" in work.columns:
+            peer_ret = pd.to_numeric(work["peer_avg_return"], errors="coerce")
+            work = work.loc[peer_ret.replace([float("inf"), float("-inf")], pd.NA).notna()]
+    elif key == "layered_funds":
+        holder = pd.to_numeric(work.get("holder_avg_daily_return"), errors="coerce") \
+            if "holder_avg_daily_return" in work.columns else None
+        held = pd.to_numeric(work.get("held_avg_daily_return"), errors="coerce") \
+            if "held_avg_daily_return" in work.columns else None
+        if holder is not None and held is not None:
+            finite = holder.between(-1e12, 1e12) & held.between(-1e12, 1e12)
+            work = work.loc[finite & ((holder > 5) | (held > 5))]
     elif key == "benford_violations" and "pl_sample_size" in work.columns:
         samples = pd.to_numeric(work["pl_sample_size"], errors="coerce").fillna(0)
         work = work.loc[samples >= BENFORD_MIN_SAMPLE]
@@ -182,7 +219,20 @@ def _severity_series(frame: pd.DataFrame, key: str = "") -> pd.Series:
             )
             break
 
-    if key == "concentration_violations":
+    if key == "peer_outliers" and severity.eq("").all():
+        parts = []
+        if "sharpe_zscore" in frame.columns:
+            parts.append(pd.to_numeric(frame["sharpe_zscore"], errors="coerce"))
+        if "return_zscore" in frame.columns:
+            parts.append(pd.to_numeric(frame["return_zscore"], errors="coerce"))
+        if parts:
+            z = pd.concat(parts, axis=1).abs().max(axis=1)
+            derived = pd.Series("", index=frame.index, dtype=str)
+            derived = derived.mask(z >= 3, "MEDIUM")
+            derived = derived.mask(z >= 4, "HIGH")
+            derived = derived.mask(z >= 5, "CRITICAL")
+            severity = derived
+    elif key == "concentration_violations":
         # High single-name weights are the normal shape of many FICs / feeder
         # funds. Keep the signal visible, but never in the Priority band alone.
         severity = severity.mask(severity.isin(("HIGH", "CRITICAL")), "MEDIUM")
@@ -468,9 +518,12 @@ def load_run(run_dir: Path) -> dict[str, Any]:
             # page still works for a --no-explain run over the full universe.
             brief = (evidence.get(cnpj) or {}).get(test)
             if brief:
-                base["severity"] = brief["severity"] or base.get("severity", "")
+                # CSV severity is already demoted for noisy detectors. A brief
+                # may add title/metric, but must not re-inflate the grade.
                 base["metric"] = brief["metric"] or base.get("metric", "")
                 base["title"] = brief.get("title", "")
+                if not base.get("severity"):
+                    base["severity"] = brief["severity"]
             detail[test] = base
         worst = max((SEVERITY_RANK.get(d.get("severity", ""), 0) for d in detail.values()),
                     default=0)
@@ -622,7 +675,7 @@ def render(data: dict[str, Any], *, fragment: bool = False) -> str:
         <label><input type="radio" name="queue" value="INVESTIGATE" checked> Investigate</label>
         <label><input type="radio" name="queue" value="REVIEW"> Review+</label>
         <label><input type="radio" name="queue" value="SIGNAL"> Any signal</label>
-        <label><input type="radio" name="queue" value="ALL"> All reporting funds</label>
+        <label><input type="radio" name="queue" value="ALL"> All funds</label>
       </fieldset>
     </div>
     <p class="result-count" id="count" role="status"></p>
@@ -1037,7 +1090,18 @@ _SCRIPT = r"""
     if (mode === 'INVESTIGATE') return f.tier === 'INVESTIGATE';
     if (mode === 'REVIEW') return TIER_RANK[f.tier] >= TIER_RANK.REVIEW;
     if (mode === 'SIGNAL') return f.count > 0;
-    return f.reported;
+    return true;
+  }
+
+  function queueValueFor(f){
+    if (f.tier === 'INVESTIGATE') return 'INVESTIGATE';
+    if (f.tier === 'REVIEW') return 'REVIEW';
+    if (f.count > 0) return 'SIGNAL';
+    return 'ALL';
+  }
+
+  function selectQueue(value){
+    queueEls.forEach(function(el){ el.checked = el.value === value; });
   }
 
   function renderList(){
@@ -1045,7 +1109,8 @@ _SCRIPT = r"""
     var selectedMode = queueEls.filter(function(el){ return el.checked; })[0];
     var mode = selectedMode ? selectedMode.value : 'INVESTIGATE';
     var rows = D.funds.filter(function(f){
-      return matches(f, q) && passesFilters(f);
+      if (q) return matches(f, q);
+      return passesFilters(f);
     });
 
     var total = rows.length;
@@ -1061,7 +1126,8 @@ _SCRIPT = r"""
 
     if (!total){
       listEl.innerHTML = '<li class="no-hits"><p class="empty" style="padding:14px 20px">' +
-        'No fund matches that search.</p></li>';
+        (q ? 'No fund matches that search.' : 'No funds in this queue.') +
+        '</p></li>';
       return;
     }
     listEl.innerHTML = (capped
@@ -1139,6 +1205,9 @@ _SCRIPT = r"""
           'of this matrix.</p>'
         : '');
 
+    if (!qEl.value.trim() && !passesFilters(f)){
+      selectQueue(queueValueFor(f));
+    }
     renderList();
     history.replaceState(null, '', '#fund=' + encodeURIComponent(f.cnpj));
     if (window.matchMedia('(max-width:860px)').matches){
@@ -1159,7 +1228,12 @@ _SCRIPT = r"""
 
   renderList();
   if (D.funds.length){
-    var requested = decodeURIComponent((location.hash.match(/#fund=([^&]+)/) || [])[1] || '');
+    var requested = '';
+    try {
+      requested = decodeURIComponent((location.hash.match(/#fund=([^&]+)/) || [])[1] || '');
+    } catch (err) {
+      requested = '';
+    }
     var first = D.funds.find(function(f){ return f.cnpj === requested; })
       || D.funds.find(function(f){ return f.tier === 'INVESTIGATE'; })
       || D.funds[0];

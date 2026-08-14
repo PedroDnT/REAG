@@ -14,6 +14,7 @@ Sources:
 
 import logging
 
+import numpy as np
 import pandas as pd
 from pathlib import Path
 from config.constants import (
@@ -131,16 +132,24 @@ class FraudSchemeDetector:
         circular_flows = []
         for row in reciprocal.itertuples(index=False):
             fund_a, fund_b = row.pair
-            circular_flows.append({
+            shared = {
                 "admin_cnpj": row.holder_admin,
-                "fund_as_asset": fund_b,
-                "held_by_funds": [fund_a],
                 "num_circular_connections": 2,
                 "cycle_length": 2,
                 "total_value": float(row.forward_value + row.reverse_value),
                 "fraud_pattern": "RECIPROCAL_FUND_INVESTMENT",
                 "severity": "HIGH",
                 "confidence": "MEDIUM",
+            }
+            circular_flows.append({
+                **shared,
+                "CNPJ_FUNDO": fund_a,
+                "counterparty_cnpj": fund_b,
+            })
+            circular_flows.append({
+                **shared,
+                "CNPJ_FUNDO": fund_b,
+                "counterparty_cnpj": fund_a,
             })
 
         result_df = pd.DataFrame(circular_flows)
@@ -202,26 +211,28 @@ class FraudSchemeDetector:
         same_admin = same_admin.copy()
         same_admin["holder_avg_daily_return"] = same_admin["CNPJ_FUNDO"].map(avg_daily_return)
         same_admin["held_avg_daily_return"] = same_admin["CD_ATIVO"].map(avg_daily_return)
-        flagged = same_admin[
-            same_admin["holder_avg_daily_return"].notna()
-            & same_admin["held_avg_daily_return"].notna()
-            & (
-                (same_admin["holder_avg_daily_return"] > 1)
-                | (same_admin["held_avg_daily_return"] > 1)
-            )
+        # Returns are percent points (pct_change * 100). inf comes from a zero
+        # quota; 1%/day is unusual but still a pricing series. Require a
+        # miraculous mean before calling the structure a layered inflation.
+        holder = pd.to_numeric(same_admin["holder_avg_daily_return"], errors="coerce")
+        held = pd.to_numeric(same_admin["held_avg_daily_return"], errors="coerce")
+        flagged = same_admin.loc[
+            np.isfinite(holder) & np.isfinite(held) & ((holder > 5) | (held > 5))
         ]
 
         layered_structures = []
         for row in flagged.itertuples():
+            peak = max(row.holder_avg_daily_return, row.held_avg_daily_return)
             layered_structures.append({
                 "admin_cnpj": row.holder_admin,
+                "CNPJ_FUNDO": row.CNPJ_FUNDO,
                 "holder_fund": row.CNPJ_FUNDO,
                 "held_fund": row.CD_ATIVO,
                 "investment_value": row.VL_MERCADO,
                 "holder_avg_daily_return": row.holder_avg_daily_return,
                 "held_avg_daily_return": row.held_avg_daily_return,
                 "fraud_pattern": "LAYERED_FUND_STRUCTURE",
-                "severity": "HIGH" if row.holder_avg_daily_return > 2 else "MEDIUM",
+                "severity": "HIGH" if peak > 10 else "MEDIUM",
                 "banco_master_similarity": "MEDIUM",
             })
 
