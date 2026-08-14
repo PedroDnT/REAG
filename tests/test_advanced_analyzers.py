@@ -187,6 +187,20 @@ class TestEnhancedPhantomDetector:
             result.get("asset_code", pd.Series(dtype=str))
         )
 
+    def test_rio_bravo_is_not_the_bravo_scheme_token(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["111"],
+            "CD_ATIVO": ["CRI_RBRA_1"],
+            "VL_MERCADO": [10.0],
+            "EMISSOR": ["RIOBRAVO"],
+        })
+        result = detector.detect_enhanced_phantom_assets(cda)
+        assert result.empty or "CRI_RBRA_1" not in set(
+            result.get("asset_code", pd.Series(dtype=str))
+        )
+
     def test_classify_bdr(self):
         from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
         detector = EnhancedPhantomAssetDetector()

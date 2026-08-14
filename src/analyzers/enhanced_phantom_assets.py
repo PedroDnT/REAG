@@ -210,7 +210,7 @@ class EnhancedPhantomAssetDetector:
                 red_flags.append('POSSIBLE_SHELL_COMPANY')
                 confidence = 'HIGH'
 
-            if any(pattern in issuer.upper() for pattern in self.suspicious_patterns['circular_flow_indicators']):
+            if self._issuer_matches_any(issuer, self.suspicious_patterns['circular_flow_indicators']):
                 red_flags.append('CIRCULAR_FLOW_ENTITY')
                 confidence = 'CRITICAL'
         else:
@@ -247,6 +247,18 @@ class EnhancedPhantomAssetDetector:
             return parts[1]
 
         return None
+
+    def _issuer_matches_any(self, issuer: str, patterns: list[str]) -> bool:
+        """Match known-scheme tokens as whole words, not substrings.
+
+        ``MASTER`` used to fire on every 'BlackRock Master' feeder, and
+        ``BRAVO`` on Rio Bravo CRIs.
+        """
+        text = issuer.upper()
+        return any(
+            re.search(rf"(?<![A-Z0-9]){re.escape(pattern.upper())}(?![A-Z0-9])", text)
+            for pattern in patterns
+        )
 
     def enhanced_validate_asset(self, asset_code: str, asset_info: dict = None) -> dict:
         """
