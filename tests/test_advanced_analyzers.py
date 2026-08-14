@@ -133,6 +133,21 @@ class TestEnhancedPhantomDetector:
         assert result["type"] == "ETF"
         assert result["should_be_public"] is True
 
+    def test_classify_fund_cnpj_before_ticker_suffix(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        result = detector.classify_asset_type("54.410.358/0001-11")
+        assert result["type"] == "FUND"
+        assert result["validation_method"] == "CVM_REGISTRY"
+
+    def test_registry_miss_is_unverified_not_phantom(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        result = detector.enhanced_validate_asset("FAKE4")
+        assert result["status"] == "NEEDS_VERIFICATION"
+        assert result["fraud_risk"] == "LOW"
+        assert result["is_valid"] is None
+
     def test_classify_bdr(self):
         from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
         detector = EnhancedPhantomAssetDetector()
@@ -202,6 +217,77 @@ class TestFraudSchemeDetector:
             make_sample_informe(), make_sample_cda(100), make_sample_cadastro(50),
         )
         assert isinstance(result, pd.DataFrame)
+
+    def test_circular_flow_requires_reciprocal_holdings(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A", "FUND_B", "FUND_C"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1", "ADMIN_2"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_B", "FUND_A", "FUND_C"],
+            "CD_ATIVO": ["FUND_A", "FUND_B", "FUND_A"],
+            "VL_MERCADO": [100.0, 80.0, 50.0],
+            "QT_POS": [1.0, 1.0, 1.0],
+            "DT_COMPTC": ["2024-01-31"] * 3,
+        })
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        assert len(result) == 1
+        assert {result.iloc[0]["fund_as_asset"], *result.iloc[0]["held_by_funds"]} == {
+            "FUND_A", "FUND_B"
+        }
+        assert result.iloc[0]["total_value"] == 180.0
+        assert result.iloc[0]["severity"] == "HIGH"
+
+    def test_one_way_same_admin_holding_is_not_called_circular(self):
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A", "FUND_B"],
+            "CNPJ_ADMIN": ["ADMIN_1", "ADMIN_1"],
+        })
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["FUND_A"],
+            "CD_ATIVO": ["FUND_B"],
+            "VL_MERCADO": [100.0],
+        })
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        assert result.empty
+
+    def test_circular_flow_scales_without_per_fund_cda_scans(self):
+        """Regression: the old loop filtered the full CDA once per fund."""
+        from src.analyzers.fraud_schemes import FraudSchemeDetector
+        import time
+
+        n_funds = 2000
+        cadastro = pd.DataFrame({
+            "CNPJ_FUNDO": [f"F{i:04d}" for i in range(n_funds)],
+            "CNPJ_ADMIN": [f"A{i // 20:03d}" for i in range(n_funds)],
+        })
+        # Mostly non-fund assets; a handful of same-admin fund holdings.
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": [f"F{i:04d}" for i in range(n_funds)] * 5,
+            "CD_ATIVO": [f"ASSET{i % 50}" for i in range(n_funds * 5)],
+            "VL_MERCADO": [1.0] * (n_funds * 5),
+            "QT_POS": [1.0] * (n_funds * 5),
+            "DT_COMPTC": ["2024-01-31"] * (n_funds * 5),
+        })
+        cda.loc[0, "CD_ATIVO"] = "F0001"
+        cda.loc[0, "CNPJ_FUNDO"] = "F0000"
+        cda.loc[1, "CD_ATIVO"] = "F0000"
+        cda.loc[1, "CNPJ_FUNDO"] = "F0001"
+
+        started = time.perf_counter()
+        result = FraudSchemeDetector().detect_circular_flow(
+            make_sample_informe(), cda, cadastro
+        )
+        elapsed = time.perf_counter() - started
+        assert elapsed < 2.0
+        assert len(result) == 1
 
     def test_layered_funds_returns_dataframe(self):
         from src.analyzers.fraud_schemes import FraudSchemeDetector
@@ -274,6 +360,39 @@ class TestPeerComparisonAnalyzer:
         target_funds = informe_df["CNPJ_FUNDO"].unique()[:5].tolist()
         comparison = analyzer.compare_with_peers(target_funds, metrics)
         assert isinstance(comparison, pd.DataFrame)
+
+    def test_compare_with_peers_emits_only_actual_outliers(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["target", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["MULTI"] * 7,
+            "avg_return": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+            "volatility": [1.0] * 7,
+            "sharpe_ratio": [10.0, 0.0, 1.0, -1.0, 0.5, -0.5, 0.2],
+        })
+        result = analyzer.compare_with_peers(["target", "p1"], metrics)
+        assert result["CNPJ_FUNDO"].tolist() == ["target"]
+        assert result.iloc[0]["is_outlier"] == True  # noqa: E712
+        assert result.iloc[0]["fraud_flag"] == "RETURNS_TOO_HIGH"
+
+    def test_generate_peer_report_handles_outlier_summary(self):
+        """Regression: report logging must use the comparison output schema."""
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        comparison = pd.DataFrame({
+            "CNPJ_FUNDO": ["target"],
+            "is_outlier": [True],
+            "fraud_flag": ["RETURNS_TOO_HIGH"],
+            "return_zscore": [4.2],
+            "sharpe_zscore": [3.7],
+        })
+        analyzer.calculate_fund_metrics = lambda _frame: pd.DataFrame()
+        analyzer.compare_with_peers = lambda _targets, _metrics: comparison
+        analyzer.detect_smoothed_returns = lambda _frame, _targets: pd.DataFrame()
+
+        report = analyzer.generate_peer_report(["target"], pd.DataFrame())
+        assert report["peer_comparison"].equals(comparison)
 
     def test_detect_smoothed_returns(self):
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer

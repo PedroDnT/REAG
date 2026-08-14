@@ -64,38 +64,51 @@ class FundLifecycleAnalyzer(BaseAnalyzer):
     def _detect_hot_start(
         self, cadastro_df: pd.DataFrame, informe_df: pd.DataFrame
     ) -> list[dict[str, Any]]:
-        findings: list[dict[str, Any]] = []
         cad = cadastro_df[["CNPJ_FUNDO", "DT_CONST"]].dropna(subset=["DT_CONST"]).copy()
         cad["DT_CONST"] = pd.to_datetime(cad["DT_CONST"], errors="coerce")
-        cad = cad.dropna(subset=["DT_CONST"])
+        cad = cad.dropna(subset=["DT_CONST"]).drop_duplicates("CNPJ_FUNDO")
+        if cad.empty:
+            return []
 
-        for _, fund_row in cad.iterrows():
-            cnpj = fund_row["CNPJ_FUNDO"]
-            dt_const = fund_row["DT_CONST"]
+        # Merge once instead of filtering the full informe per fund (O(funds x rows)).
+        inf = informe_df[["CNPJ_FUNDO", "DT_COMPTC", "VL_PATRIM_LIQ"]].copy()
+        inf["DT_COMPTC"] = pd.to_datetime(inf["DT_COMPTC"], errors="coerce")
+        inf["VL_PATRIM_LIQ"] = pd.to_numeric(inf["VL_PATRIM_LIQ"], errors="coerce")
+        inf = inf.dropna(subset=["CNPJ_FUNDO", "DT_COMPTC", "VL_PATRIM_LIQ"])
 
-            fund_informe = informe_df[informe_df["CNPJ_FUNDO"] == cnpj].copy()
-            if fund_informe.empty:
-                continue
+        merged = inf.merge(cad, on="CNPJ_FUNDO", how="inner")
+        if merged.empty:
+            return []
 
-            fund_informe["DT_COMPTC"] = pd.to_datetime(fund_informe["DT_COMPTC"], errors="coerce")
-            early = fund_informe[
-                (fund_informe["DT_COMPTC"] >= dt_const)
-                & (fund_informe["DT_COMPTC"] <= dt_const + pd.Timedelta(days=HOT_START_DAYS))
-            ]
-            if early.empty:
-                continue
+        early = merged[
+            (merged["DT_COMPTC"] >= merged["DT_CONST"])
+            & (
+                merged["DT_COMPTC"]
+                <= merged["DT_CONST"] + pd.Timedelta(days=HOT_START_DAYS)
+            )
+        ]
+        if early.empty:
+            return []
 
-            max_pl = early["VL_PATRIM_LIQ"].astype(float).max()
-            if max_pl >= HOT_START_PL_MIN:
-                findings.append({
-                    "CNPJ_FUNDO": cnpj,
-                    "signal_type": "hot_start",
-                    "DT_CONST": str(dt_const.date()),
-                    "DT_CANCEL": None,
-                    "days_active": None,
-                    "max_pl": round(float(max_pl), 2),
-                    "severity": "CRITICAL" if max_pl >= HOT_START_PL_MIN * 5 else "HIGH",
-                })
+        max_pl = (
+            early.groupby("CNPJ_FUNDO", sort=False)
+            .agg(max_pl=("VL_PATRIM_LIQ", "max"), DT_CONST=("DT_CONST", "first"))
+        )
+        flagged = max_pl[max_pl["max_pl"] >= HOT_START_PL_MIN]
+        findings: list[dict[str, Any]] = []
+        for cnpj, row in flagged.iterrows():
+            max_pl_value = float(row["max_pl"])
+            findings.append({
+                "CNPJ_FUNDO": cnpj,
+                "signal_type": "hot_start",
+                "DT_CONST": str(pd.Timestamp(row["DT_CONST"]).date()),
+                "DT_CANCEL": None,
+                "days_active": None,
+                "max_pl": round(max_pl_value, 2),
+                "severity": (
+                    "CRITICAL" if max_pl_value >= HOT_START_PL_MIN * 5 else "HIGH"
+                ),
+            })
         return findings
 
     def _detect_short_lived(self, cadastro_df: pd.DataFrame) -> list[dict[str, Any]]:
@@ -134,27 +147,26 @@ class FundLifecycleAnalyzer(BaseAnalyzer):
         cad["DT_CONST"] = pd.to_datetime(cad["DT_CONST"], errors="coerce")
         cad = cad.dropna(subset=["DT_CONST"])
 
+        window = pd.Timedelta(days=COORDINATED_CREATION_WINDOW)
         for admin, group in cad.groupby("CNPJ_ADMIN"):
             if len(group) < 3:
                 continue
-            sorted_group = group.sort_values("DT_CONST")
-            dates = sorted_group["DT_CONST"].values
-
-            for i in range(len(dates)):
-                window_end = dates[i] + pd.Timedelta(days=COORDINATED_CREATION_WINDOW)
-                cluster = sorted_group[
-                    (sorted_group["DT_CONST"] >= dates[i])
-                    & (sorted_group["DT_CONST"] <= window_end)
-                ]
-                if len(cluster) >= 3:
+            dates = group["DT_CONST"].sort_values().reset_index(drop=True)
+            # Sliding window over sorted constitution dates: O(n) per admin.
+            left = 0
+            for right in range(len(dates)):
+                while dates.iloc[right] - dates.iloc[left] > window:
+                    left += 1
+                cluster_size = right - left + 1
+                if cluster_size >= 3:
                     findings.append({
                         "CNPJ_FUNDO": str(admin),
                         "signal_type": "coordinated_creation",
-                        "DT_CONST": str(pd.Timestamp(dates[i]).date()),
+                        "DT_CONST": str(pd.Timestamp(dates.iloc[left]).date()),
                         "DT_CANCEL": None,
-                        "days_active": len(cluster),
+                        "days_active": cluster_size,
                         "max_pl": None,
-                        "severity": "HIGH" if len(cluster) >= 5 else "MEDIUM",
+                        "severity": "HIGH" if cluster_size >= 5 else "MEDIUM",
                     })
                     break  # One finding per admin
 
@@ -163,36 +175,42 @@ class FundLifecycleAnalyzer(BaseAnalyzer):
     def _detect_suspicious_inflow(
         self, cadastro_df: pd.DataFrame, informe_df: pd.DataFrame
     ) -> list[dict[str, Any]]:
-        findings: list[dict[str, Any]] = []
         cad = cadastro_df[["CNPJ_FUNDO", "DT_CONST"]].dropna(subset=["DT_CONST"]).copy()
         cad["DT_CONST"] = pd.to_datetime(cad["DT_CONST"], errors="coerce")
-        cad = cad.dropna(subset=["DT_CONST"])
+        cad = cad.dropna(subset=["DT_CONST"]).drop_duplicates("CNPJ_FUNDO")
+        if cad.empty or "CAPTC_DIA" not in informe_df.columns:
+            return []
 
-        for _, fund_row in cad.iterrows():
-            cnpj = fund_row["CNPJ_FUNDO"]
-            dt_const = fund_row["DT_CONST"]
+        inf = informe_df[["CNPJ_FUNDO", "DT_COMPTC", "CAPTC_DIA"]].copy()
+        inf["DT_COMPTC"] = pd.to_datetime(inf["DT_COMPTC"], errors="coerce")
+        inf["CAPTC_DIA"] = pd.to_numeric(inf["CAPTC_DIA"], errors="coerce")
+        inf = inf.dropna(subset=["CNPJ_FUNDO", "DT_COMPTC", "CAPTC_DIA"])
 
-            fund_informe = informe_df[informe_df["CNPJ_FUNDO"] == cnpj].copy()
-            if fund_informe.empty:
-                continue
+        merged = inf.merge(cad, on="CNPJ_FUNDO", how="inner")
+        if merged.empty:
+            return []
 
-            fund_informe["DT_COMPTC"] = pd.to_datetime(fund_informe["DT_COMPTC"], errors="coerce")
-            first_week = fund_informe[
-                (fund_informe["DT_COMPTC"] >= dt_const)
-                & (fund_informe["DT_COMPTC"] <= dt_const + pd.Timedelta(days=7))
-            ]
-            if first_week.empty:
-                continue
+        first_week = merged[
+            (merged["DT_COMPTC"] >= merged["DT_CONST"])
+            & (merged["DT_COMPTC"] <= merged["DT_CONST"] + pd.Timedelta(days=7))
+        ]
+        if first_week.empty:
+            return []
 
-            total_inflow = first_week["CAPTC_DIA"].astype(float).sum()
-            if total_inflow >= HOT_START_PL_MIN:
-                findings.append({
-                    "CNPJ_FUNDO": cnpj,
-                    "signal_type": "suspicious_inflow_timing",
-                    "DT_CONST": str(dt_const.date()),
-                    "DT_CANCEL": None,
-                    "days_active": None,
-                    "max_pl": round(float(total_inflow), 2),
-                    "severity": "HIGH",
-                })
+        totals = (
+            first_week.groupby("CNPJ_FUNDO", sort=False)
+            .agg(total_inflow=("CAPTC_DIA", "sum"), DT_CONST=("DT_CONST", "first"))
+        )
+        flagged = totals[totals["total_inflow"] >= HOT_START_PL_MIN]
+        findings: list[dict[str, Any]] = []
+        for cnpj, row in flagged.iterrows():
+            findings.append({
+                "CNPJ_FUNDO": cnpj,
+                "signal_type": "suspicious_inflow_timing",
+                "DT_CONST": str(pd.Timestamp(row["DT_CONST"]).date()),
+                "DT_CANCEL": None,
+                "days_active": None,
+                "max_pl": round(float(row["total_inflow"]), 2),
+                "severity": "HIGH",
+            })
         return findings

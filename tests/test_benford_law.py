@@ -192,6 +192,14 @@ class TestBenfordLawAnalyzer:
         assert result['sample_size'] == 0
         assert 'error' in result
 
+    def test_analyze_series_short_sample_is_not_scored(self, analyzer):
+        """A single CVM month is too short to support a Benford verdict."""
+        result = analyzer.analyze_series(pd.Series(range(1, 23)), "One month")
+        assert result["sample_size"] == 22
+        assert result["conformity"] == "INSUFFICIENT_SAMPLE"
+        assert result["fraud_risk"] == "UNKNOWN"
+        assert result["mad"] is None
+
     def test_analyze_fund_data_structure(self, analyzer, sample_informe_df):
         """Test that analyze_fund_data returns correct structure"""
         result_df = analyzer.analyze_fund_data(sample_informe_df)

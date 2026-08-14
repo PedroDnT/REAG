@@ -91,6 +91,19 @@ class EnhancedPhantomAssetDetector:
             Dict com: type, should_be_public, validation_method, confidence
         """
         asset_code = str(asset_code).strip().upper()
+        digits = re.sub(r"\D", "", asset_code)
+
+        # A 14-digit identifier is a fund CNPJ. Check this before ticker suffix
+        # heuristics: thousands of valid fund CNPJs end in 11 or 34 and were
+        # previously misclassified as ETFs/BDRs.
+        if len(digits) == 14:
+            return {
+                'type': 'FUND',
+                'should_be_public': True,
+                'validation_method': 'CVM_REGISTRY',
+                'confidence': 'HIGH',
+                'liquidity_expectation': 'MEDIUM'
+            }
 
         # Ações (públicas - DEVEM estar na B3)
         if re.match(r'^[A-Z]{4}[3-8]$', asset_code):
@@ -160,16 +173,6 @@ class EnhancedPhantomAssetDetector:
                 'validation_method': 'ISSUER_CHECK',
                 'confidence': 'MEDIUM',
                 'liquidity_expectation': 'LOW'
-            }
-
-        # CNPJ (fundo de investimento)
-        if len(asset_code.replace('.', '').replace('/', '').replace('-', '')) == 14:
-            return {
-                'type': 'FUND',
-                'should_be_public': True,
-                'validation_method': 'CVM_REGISTRY',
-                'confidence': 'HIGH',
-                'liquidity_expectation': 'MEDIUM'
             }
 
         # Desconhecido
@@ -273,6 +276,7 @@ class EnhancedPhantomAssetDetector:
         # Validação para ativos PÚBLICOS
         if classification['should_be_public']:
             is_valid = False
+            registry_complete = False
 
             if classification['type'] == 'STOCK':
                 is_valid = asset_code in self.valid_stocks
@@ -281,15 +285,29 @@ class EnhancedPhantomAssetDetector:
             elif classification['type'] == 'BDR':
                 is_valid = asset_code in self.valid_bdrs
             elif classification['type'] == 'FUND':
-                is_valid = asset_code in self.valid_funds
+                normalized = re.sub(r"\D", "", str(asset_code))
+                is_valid = normalized in self.valid_funds
+                registry_complete = bool(self.valid_funds)
 
-            result.update({
-                'is_valid': is_valid,
-                'status': 'VALID' if is_valid else 'PHANTOM',
-                'confidence': 'HIGH',
-                'fraud_risk': 'CRITICAL' if not is_valid else 'NONE',
-                'reason': 'Not found in public registry' if not is_valid else 'Found in registry'
-            })
+            if is_valid:
+                result.update({
+                    'is_valid': True,
+                    'status': 'VALID',
+                    'confidence': 'HIGH',
+                    'fraud_risk': 'NONE',
+                    'reason': 'Found in registry'
+                })
+            else:
+                # A cache miss is not positive evidence that an asset is
+                # fictitious. The bundled B3 lists are deliberately incomplete,
+                # and even the CVM cadastro is a current snapshot.
+                result.update({
+                    'is_valid': None,
+                    'status': 'NEEDS_VERIFICATION',
+                    'confidence': 'LOW' if not registry_complete else 'MEDIUM',
+                    'fraud_risk': 'LOW',
+                    'reason': 'Not found in the available registry snapshot'
+                })
 
         # Validação para ativos PRIVADOS
         elif not classification['should_be_public']:
@@ -424,5 +442,9 @@ class EnhancedPhantomAssetDetector:
         """Carrega fundos do cadastro CVM"""
         df = pd.read_csv(cadastro_path, encoding='latin1', sep=';')
         if 'CNPJ_FUNDO' in df.columns:
-            self.valid_funds = set(df['CNPJ_FUNDO'].dropna().astype(str))
+            self.valid_funds = {
+                re.sub(r"\D", "", value)
+                for value in df['CNPJ_FUNDO'].dropna().astype(str)
+                if len(re.sub(r"\D", "", value)) == 14
+            }
             logger.info(f"{len(self.valid_funds):,} fundos carregados")
