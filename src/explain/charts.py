@@ -116,12 +116,11 @@ def build_circular_flow_mermaid(row: dict[str, Any]) -> str:
     Best-effort mermaid diagram for a circular-flow record.
     """
     admin = str(row.get("admin_cnpj", "")).strip() or "ADMIN"
-    fund = str(row.get("fund_as_asset", "")).strip() or "FUND"
-    holders = row.get("held_by_funds") or []
-    if isinstance(holders, str):
-        holders = [holders]
+    fund = str(row.get("CNPJ_FUNDO", "")).strip() or "FUND"
+    counterparty = str(row.get("counterparty_cnpj", "")).strip()
 
     lines = ["flowchart LR", f'  A["Administrator {admin}"] --> F["Fund {fund}"]']
-    for idx, holder in enumerate(holders, start=1):
-        lines.append(f'  F --> H{idx}["Holder fund {holder}"]')
+    if counterparty:
+        lines.append(f'  F --> C["Fund {counterparty}"]')
+        lines.append("  C --> F")
     return "\n".join(lines) + "\n"

@@ -372,41 +372,17 @@ class Explainer:
 
                 # Attach to involved funds where possible.
                 if finding_id == "circular_flow":
-                    for fund_col in ("fund_as_asset",):
+                    for fund_col in ("CNPJ_FUNDO", "counterparty_cnpj"):
                         fund_digits = _normalize_cnpj_digits(row.get(fund_col))
-                        if fund_digits:
-                            fund_entity_id = f"FUND_{fund_digits}"
-                            entity_catalog.setdefault(
-                                fund_entity_id,
-                                Entity(entity_id=fund_entity_id, entity_type="FUND", cnpj_digits=fund_digits, name=None, relationships=()),
-                            )
-                            add(
-                                fund_entity_id,
-                                EvidenceItem(
-                                    finding_id=finding_id,
-                                    title=definition.title if definition else finding_id,
-                                    severity=definition.severity_rule(row) if definition else "MEDIUM",
-                                    metric=_metric_for_scheme(finding_id=finding_id, row=row),
-                                    time_window="",
-                                    counterparties=_counterparties_for_scheme(finding_id=finding_id, row=row),
-                                    source_ref=source_ref,
-                                    record=_filter_record(row, definition) if definition else dict(row),
-                                ),
-                            )
-                    held_by = row.get("held_by_funds") or []
-                    if isinstance(held_by, str):
-                        held_by = [held_by]
-                    for held in held_by:
-                        held_digits = _normalize_cnpj_digits(held)
-                        if not held_digits:
+                        if not fund_digits:
                             continue
-                        held_entity_id = f"FUND_{held_digits}"
+                        fund_entity_id = f"FUND_{fund_digits}"
                         entity_catalog.setdefault(
-                            held_entity_id,
-                            Entity(entity_id=held_entity_id, entity_type="FUND", cnpj_digits=held_digits, name=None, relationships=()),
+                            fund_entity_id,
+                            Entity(entity_id=fund_entity_id, entity_type="FUND", cnpj_digits=fund_digits, name=None, relationships=()),
                         )
                         add(
-                            held_entity_id,
+                            fund_entity_id,
                             EvidenceItem(
                                 finding_id=finding_id,
                                 title=definition.title if definition else finding_id,
@@ -1156,14 +1132,10 @@ def _metric_for_scheme(*, finding_id: str, row: dict[str, Any]) -> str:
 
 def _counterparties_for_scheme(*, finding_id: str, row: dict[str, Any]) -> str:
     if finding_id == "circular_flow":
-        holders = row.get("held_by_funds") or []
-        if isinstance(holders, str):
-            holders = [holders]
-        fund = row.get("fund_as_asset")
         parts = []
-        if fund:
-            parts.append(str(fund))
-        parts.extend(str(h) for h in holders if h)
+        for col in ("CNPJ_FUNDO", "counterparty_cnpj"):
+            if row.get(col):
+                parts.append(str(row.get(col)))
         return ", ".join(parts)
     if finding_id == "layered_funds":
         parts = []

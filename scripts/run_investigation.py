@@ -978,12 +978,9 @@ def _collect_flagged_entities(*, results: dict[str, pd.DataFrame], cadastro_df: 
     if df is not None and not df.empty:
         for row in df.to_dict(orient="records"):
             add("ADMINISTRATOR", row.get("admin_cnpj"))
-            add("FUND", row.get("fund_as_asset"))
-            held_by = row.get("held_by_funds") or []
-            if isinstance(held_by, str):
-                held_by = [held_by]
-            for held in held_by:
-                add("FUND", held)
+            for fund in (row.get("CNPJ_FUNDO"), row.get("counterparty_cnpj")):
+                if fund:
+                    add("FUND", fund)
 
     df = results.get("layered_funds")
     if df is not None and not df.empty:
