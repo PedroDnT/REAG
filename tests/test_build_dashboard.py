@@ -277,6 +277,8 @@ class TestNonLeadsAreFilteredFromTheMatrix:
         )
         fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
         assert "layered_funds" not in fund["hits"]
+
+    def test_undersampled_benford_rows_are_dropped(self, run_dir):
         (run_dir / "findings" / "benford_violations.csv").write_text(
             "fund_cnpj,pl_sample_size,overall_fraud_risk,pl_mad\n"
             f"{FUND_A},21,CRITICAL,0.2\n"
