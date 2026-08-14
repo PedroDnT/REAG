@@ -372,10 +372,12 @@ class Explainer:
 
                 # Attach to involved funds where possible.
                 if finding_id == "circular_flow":
-                    for fund_col in ("CNPJ_FUNDO", "counterparty_cnpj"):
-                        fund_digits = _normalize_cnpj_digits(row.get(fund_col))
-                        if not fund_digits:
-                            continue
+                    # detect_circular_flow emits one row per fund (both directions),
+                    # so each fund already appears exactly once as CNPJ_FUNDO. Only
+                    # attach to CNPJ_FUNDO here; iterating counterparty_cnpj as well
+                    # would double-count evidence for every fund in a reciprocal pair.
+                    fund_digits = _normalize_cnpj_digits(row.get("CNPJ_FUNDO"))
+                    if fund_digits:
                         fund_entity_id = f"FUND_{fund_digits}"
                         entity_catalog.setdefault(
                             fund_entity_id,
