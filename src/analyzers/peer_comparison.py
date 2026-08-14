@@ -21,9 +21,13 @@ from config.constants import (
 
 logger = logging.getLogger(__name__)
 
-# Daily-return std below this (percent points) is a flat NAV series, not a
-# Sharpe. 1e-9 vol produces |sharpe| in the tens of thousands.
-MIN_VOLATILITY_FOR_SHARPE = 1e-3
+# Daily-return std in percent points. Below ~5 bps/day the NAV is effectively
+# flat and Sharpe is  avg / epsilon, which z-scores as a fraud lead.
+MIN_VOLATILITY_FOR_SHARPE = 0.05
+
+# CLASSE values that do not map to a real peer group. Z-scoring Sharpe against
+# 24k unrelated OTHER funds is not a comparison.
+CATCHALL_PEER_CATEGORIES = frozenset({"OTHER", "UNKNOWN"})
 
 
 class PeerComparisonAnalyzer:
@@ -228,7 +232,13 @@ class PeerComparisonAnalyzer:
 
         return_z = targets["avg_return_zscore"].abs()
         sharpe_z = targets["sharpe_ratio_zscore"].abs()
-        sharpe_usable = targets["volatility"].fillna(0) >= MIN_VOLATILITY_FOR_SHARPE
+        named_peer_group = ~targets["category"].fillna("UNKNOWN").isin(
+            CATCHALL_PEER_CATEGORIES
+        )
+        sharpe_usable = (
+            named_peer_group
+            & (targets["volatility"].fillna(0) >= MIN_VOLATILITY_FOR_SHARPE)
+        )
         targets["is_outlier"] = (
             (return_z > ZSCORE_THRESHOLD)
             | (sharpe_usable & (sharpe_z > ZSCORE_THRESHOLD))

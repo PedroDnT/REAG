@@ -480,6 +480,32 @@ class TestPeerComparisonAnalyzer:
         result = analyzer.compare_with_peers(["flat"], metrics)
         assert result.empty
 
+    def test_compare_with_peers_ignores_low_percent_vol_sharpe(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["smooth", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["MULTI"] * 7,
+            "avg_return": [0.02, 0.01, 0.02, 0.00, 0.03, 0.01, 0.02],
+            "volatility": [0.005, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            "sharpe_ratio": [4.0, 0.01, 0.02, 0.00, 0.03, 0.01, 0.02],
+        })
+        result = analyzer.compare_with_peers(["smooth"], metrics)
+        assert result.empty
+
+    def test_compare_with_peers_ignores_sharpe_in_catchall_category(self):
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        metrics = pd.DataFrame({
+            "CNPJ_FUNDO": ["dump", "p1", "p2", "p3", "p4", "p5", "p6"],
+            "category": ["OTHER"] * 7,
+            "avg_return": [0.02, 0.01, 0.02, 0.00, 0.03, 0.01, 0.02],
+            "volatility": [1.0] * 7,
+            "sharpe_ratio": [50.0, 0.01, 0.02, 0.00, 0.03, 0.01, 0.02],
+        })
+        result = analyzer.compare_with_peers(["dump"], metrics)
+        assert result.empty
+
     def test_compare_with_peers_ignores_inf_category_contamination(self):
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer
         analyzer = PeerComparisonAnalyzer()

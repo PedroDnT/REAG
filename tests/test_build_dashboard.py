@@ -257,6 +257,19 @@ class TestNonLeadsAreFilteredFromTheMatrix:
         assert "peer_outliers" not in by_cnpj[FUND_A]["hits"]
         assert "peer_outliers" in by_cnpj[FUND_B]["hits"]
 
+    def test_peer_sharpe_only_catchall_and_low_vol_rows_are_dropped(self, run_dir):
+        (run_dir / "findings" / "peer_outliers.csv").write_text(
+            "CNPJ_FUNDO,is_outlier,return_zscore,sharpe_zscore,"
+            "fund_volatility,peer_avg_return,category\n"
+            f"{FUND_A},True,0.1,12.0,0.005,1.7,OTHER\n"
+            f"{FUND_B},True,0.2,8.0,1.2,1.7,OTHER\n"
+            f"{FUND_A},True,9.1,0.2,1.2,0.1,OTHER\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {f["cnpj"]: f for f in data["funds"]}
+        assert by_cnpj[FUND_A]["detail"]["peer_outliers"]["events"] == 1
+        assert "peer_outliers" not in by_cnpj[FUND_B]["hits"]
+
     def test_layered_inf_rows_are_dropped(self, run_dir):
         (run_dir / "findings" / "layered_funds.csv").write_text(
             "holder_fund,held_fund,holder_avg_daily_return,held_avg_daily_return,severity\n"

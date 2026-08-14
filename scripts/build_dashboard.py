@@ -37,6 +37,10 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.analyzers.peer_comparison import (  # noqa: E402
+    CATCHALL_PEER_CATEGORIES,
+    MIN_VOLATILITY_FOR_SHARPE,
+)
 from src.utils.cnpj_utils import normalize_cnpj, normalize_cnpj_series  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -164,7 +168,16 @@ def _prepare_findings_frame(key: str, frame: pd.DataFrame) -> pd.DataFrame:
                 work["return_zscore"] if "return_zscore" in work.columns else 0,
                 errors="coerce",
             ).abs().fillna(0)
-            work = work.loc[(return_z > 3) | ((vol >= 1e-3) & (sharpe_z > 3))]
+            if "category" in work.columns:
+                named_peers = ~work["category"].fillna("UNKNOWN").isin(
+                    CATCHALL_PEER_CATEGORIES
+                )
+            else:
+                named_peers = True
+            work = work.loc[
+                (return_z > 3)
+                | (named_peers & (vol >= MIN_VOLATILITY_FOR_SHARPE) & (sharpe_z > 3))
+            ]
         if "peer_avg_return" in work.columns:
             peer_ret = pd.to_numeric(work["peer_avg_return"], errors="coerce")
             work = work.loc[peer_ret.replace([float("inf"), float("-inf")], pd.NA).notna()]
