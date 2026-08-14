@@ -223,7 +223,7 @@ class PeerComparisonAnalyzer:
             outliers["avg_return_zscore"] < -ZSCORE_THRESHOLD,
             outliers["sharpe_ratio_zscore"] > ZSCORE_THRESHOLD,
         ]
-        outliers["anomaly_type"] = np.select(
+        outliers["fraud_flag"] = np.select(
             conditions,
             ["RETURNS_TOO_HIGH", "HIDDEN_LOSSES", "RISK_ADJUSTED_TOO_GOOD"],
             default="UNUSUAL_PEER_PROFILE",
@@ -243,7 +243,7 @@ class PeerComparisonAnalyzer:
             "volatility_zscore": outliers["volatility_zscore"],
             "sharpe_zscore": outliers["sharpe_ratio_zscore"],
             "is_outlier": True,
-            "anomaly_type": outliers["anomaly_type"],
+            "fraud_flag": outliers["fraud_flag"],
         }).sort_values("return_zscore", ascending=False)
 
         logger.info(

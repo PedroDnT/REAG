@@ -1163,7 +1163,7 @@ _SCRIPT = r"""
     var first = D.funds.find(function(f){ return f.cnpj === requested; })
       || D.funds.find(function(f){ return f.tier === 'INVESTIGATE'; })
       || D.funds[0];
-    if (first && first.count) renderDetail(first.cnpj);
+    if (first) renderDetail(first.cnpj);
   }
 })();
 """

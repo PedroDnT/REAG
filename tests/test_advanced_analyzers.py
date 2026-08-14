@@ -374,7 +374,25 @@ class TestPeerComparisonAnalyzer:
         result = analyzer.compare_with_peers(["target", "p1"], metrics)
         assert result["CNPJ_FUNDO"].tolist() == ["target"]
         assert result.iloc[0]["is_outlier"] == True  # noqa: E712
-        assert result.iloc[0]["anomaly_type"] == "RETURNS_TOO_HIGH"
+        assert result.iloc[0]["fraud_flag"] == "RETURNS_TOO_HIGH"
+
+    def test_generate_peer_report_handles_outlier_summary(self):
+        """Regression: report logging must use the comparison output schema."""
+        from src.analyzers.peer_comparison import PeerComparisonAnalyzer
+        analyzer = PeerComparisonAnalyzer()
+        comparison = pd.DataFrame({
+            "CNPJ_FUNDO": ["target"],
+            "is_outlier": [True],
+            "fraud_flag": ["RETURNS_TOO_HIGH"],
+            "return_zscore": [4.2],
+            "sharpe_zscore": [3.7],
+        })
+        analyzer.calculate_fund_metrics = lambda _frame: pd.DataFrame()
+        analyzer.compare_with_peers = lambda _targets, _metrics: comparison
+        analyzer.detect_smoothed_returns = lambda _frame, _targets: pd.DataFrame()
+
+        report = analyzer.generate_peer_report(["target"], pd.DataFrame())
+        assert report["peer_comparison"].equals(comparison)
 
     def test_detect_smoothed_returns(self):
         from src.analyzers.peer_comparison import PeerComparisonAnalyzer

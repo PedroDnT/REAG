@@ -304,3 +304,8 @@ class TestLeadsFraming:
         assert data["reporting_funds"] == 2
         assert by_cnpj["99888777000166"]["tier"] == "NO_SIGNAL"
         assert by_cnpj["99888777000166"]["reported"] is True
+
+    def test_deep_link_renders_a_no_signal_fund(self, run_dir):
+        page = render(load_run(run_dir))
+        assert "if (first) renderDetail(first.cnpj)" in page
+        assert "if (first && first.count)" not in page
