@@ -235,8 +235,16 @@ class TestNonLeadsAreFilteredFromTheMatrix:
         by_cnpj = {f["cnpj"]: f for f in data["funds"]}
         assert "peer_outliers" not in by_cnpj[FUND_A]["hits"]
         assert "peer_outliers" in by_cnpj[FUND_B]["hits"]
+        assert by_cnpj[FUND_B]["detail"]["peer_outliers"]["severity"] == "HIGH"
 
-    def test_undersampled_benford_rows_are_dropped(self, run_dir):
+    def test_peer_zscore_without_severity_column_is_still_strong(self, run_dir):
+        (run_dir / "findings" / "peer_outliers.csv").write_text(
+            "CNPJ_FUNDO,is_outlier,return_zscore,sharpe_zscore\n"
+            f"{FUND_A},True,9.1,0.2\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["detail"]["peer_outliers"]["severity"] == "CRITICAL"
+        assert fund["tier"] in ("REVIEW", "INVESTIGATE")
         (run_dir / "findings" / "benford_violations.csv").write_text(
             "fund_cnpj,pl_sample_size,overall_fraud_risk,pl_mad\n"
             f"{FUND_A},21,CRITICAL,0.2\n"
@@ -276,8 +284,11 @@ class TestLeadsFraming:
         assert "Leads, not verdicts" in page
         assert "Investigate" in page
         assert "Review+" in page
-        assert "All reporting funds" in page
+        assert "All funds" in page
         assert "no signal" in page
+        assert "if (q) return matches(f, q)" in page
+        assert "No funds in this queue." in page
+        assert "selectQueue(queueValueFor(f))" in page
 
     def test_two_strong_evidence_families_create_investigate_tier(self, run_dir):
         (run_dir / "findings" / "reconciliation_gaps.csv").write_text(
@@ -309,3 +320,42 @@ class TestLeadsFraming:
         page = render(load_run(run_dir))
         assert "if (first) renderDetail(first.cnpj)" in page
         assert "if (first && first.count)" not in page
+
+    def test_circular_flow_rows_enter_the_fund_matrix(self, run_dir):
+        (run_dir / "findings" / "circular_flow.csv").write_text(
+            "CNPJ_FUNDO,counterparty_cnpj,severity\n"
+            f"{FUND_A},{FUND_B},HIGH\n"
+            f"{FUND_B},{FUND_A},HIGH\n"
+        )
+        data = load_run(run_dir)
+        by_cnpj = {fund["cnpj"]: fund for fund in data["funds"]}
+        assert "circular_flow" in by_cnpj[FUND_A]["hits"]
+        assert "circular_flow" in by_cnpj[FUND_B]["hits"]
+        assert "circular_flow" not in data["entity_level"]
+
+    def test_layered_holder_fund_keys_the_matrix(self, run_dir):
+        (run_dir / "findings" / "layered_funds.csv").write_text(
+            f"holder_fund,held_fund,severity\n{FUND_A},{FUND_B},HIGH\n"
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert "layered_funds" in fund["hits"]
+
+    def test_briefs_cannot_reinflate_demoted_concentration(self, run_dir):
+        (run_dir / "findings" / "concentration_violations.csv").write_text(
+            f"CNPJ_FUNDO,top1_pct,severity\n{FUND_A},99.9,CRITICAL\n"
+        )
+        evidence = json.loads(
+            (run_dir / "entities" / f"FUND_{FUND_A}" / "evidence.json").read_text()
+        )
+        evidence["evidence"].append({
+            "finding_id": "concentration_violation",
+            "title": "Concentration",
+            "severity": "CRITICAL",
+            "metric": "top1_pct: 99.9",
+            "source_ref": "findings/concentration_violations.csv",
+        })
+        (run_dir / "entities" / f"FUND_{FUND_A}" / "evidence.json").write_text(
+            json.dumps(evidence)
+        )
+        fund = next(f for f in load_run(run_dir)["funds"] if f["cnpj"] == FUND_A)
+        assert fund["detail"]["concentration_violations"]["severity"] == "MEDIUM"

@@ -131,16 +131,24 @@ class FraudSchemeDetector:
         circular_flows = []
         for row in reciprocal.itertuples(index=False):
             fund_a, fund_b = row.pair
-            circular_flows.append({
+            shared = {
                 "admin_cnpj": row.holder_admin,
-                "fund_as_asset": fund_b,
-                "held_by_funds": [fund_a],
                 "num_circular_connections": 2,
                 "cycle_length": 2,
                 "total_value": float(row.forward_value + row.reverse_value),
                 "fraud_pattern": "RECIPROCAL_FUND_INVESTMENT",
                 "severity": "HIGH",
                 "confidence": "MEDIUM",
+            }
+            circular_flows.append({
+                **shared,
+                "CNPJ_FUNDO": fund_a,
+                "counterparty_cnpj": fund_b,
+            })
+            circular_flows.append({
+                **shared,
+                "CNPJ_FUNDO": fund_b,
+                "counterparty_cnpj": fund_a,
             })
 
         result_df = pd.DataFrame(circular_flows)
@@ -215,6 +223,7 @@ class FraudSchemeDetector:
         for row in flagged.itertuples():
             layered_structures.append({
                 "admin_cnpj": row.holder_admin,
+                "CNPJ_FUNDO": row.CNPJ_FUNDO,
                 "holder_fund": row.CNPJ_FUNDO,
                 "held_fund": row.CD_ATIVO,
                 "investment_value": row.VL_MERCADO,

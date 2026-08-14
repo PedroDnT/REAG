@@ -228,6 +228,15 @@ class PeerComparisonAnalyzer:
             ["RETURNS_TOO_HIGH", "HIDDEN_LOSSES", "RISK_ADJUSTED_TOO_GOOD"],
             default="UNUSUAL_PEER_PROFILE",
         )
+        z = np.maximum(
+            outliers["avg_return_zscore"].abs(),
+            outliers["sharpe_ratio_zscore"].abs(),
+        )
+        outliers["severity"] = np.select(
+            [z >= 5, z >= 4],
+            ["CRITICAL", "HIGH"],
+            default="MEDIUM",
+        )
 
         result_df = pd.DataFrame({
             "CNPJ_FUNDO": outliers["CNPJ_FUNDO"],
@@ -244,6 +253,7 @@ class PeerComparisonAnalyzer:
             "sharpe_zscore": outliers["sharpe_ratio_zscore"],
             "is_outlier": True,
             "fraud_flag": outliers["fraud_flag"],
+            "severity": outliers["severity"],
         }).sort_values("return_zscore", ascending=False)
 
         logger.info(

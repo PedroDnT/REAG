@@ -148,6 +148,45 @@ class TestEnhancedPhantomDetector:
         assert result["fraud_risk"] == "LOW"
         assert result["is_valid"] is None
 
+    def test_fund_registry_miss_is_emitted_when_cadastro_loaded(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        detector.valid_funds = {"11111111000191"}
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["11111111000191"],
+            "CD_ATIVO": ["22222222000172"],
+            "VL_MERCADO": [100.0],
+        })
+        result = detector.detect_enhanced_phantom_assets(cda)
+        assert len(result) == 1
+        assert result.iloc[0]["status"] == "NEEDS_VERIFICATION"
+        assert result.iloc[0]["asset_type"] == "FUND"
+
+    def test_stock_cache_miss_is_not_emitted(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["111"],
+            "CD_ATIVO": ["FAKE4"],
+            "VL_MERCADO": [10.0],
+        })
+        result = detector.detect_enhanced_phantom_assets(cda)
+        assert result.empty or "FAKE4" not in set(result.get("asset_code", pd.Series(dtype=str)))
+
+    def test_blackrock_master_name_is_not_a_circular_flow_lead(self):
+        from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
+        detector = EnhancedPhantomAssetDetector()
+        cda = pd.DataFrame({
+            "CNPJ_FUNDO": ["111"],
+            "CD_ATIVO": ["BLACKROCK MASTER REFERENCIADO DI"],
+            "VL_MERCADO": [10.0],
+            "EMISSOR": ["BLACKROCK MASTER REFERENCIADO DI"],
+        })
+        result = detector.detect_enhanced_phantom_assets(cda)
+        assert result.empty or "BLACKROCK MASTER REFERENCIADO DI" not in set(
+            result.get("asset_code", pd.Series(dtype=str))
+        )
+
     def test_classify_bdr(self):
         from src.analyzers.enhanced_phantom_assets import EnhancedPhantomAssetDetector
         detector = EnhancedPhantomAssetDetector()
@@ -235,11 +274,8 @@ class TestFraudSchemeDetector:
         result = FraudSchemeDetector().detect_circular_flow(
             make_sample_informe(), cda, cadastro
         )
-        assert len(result) == 1
-        assert {result.iloc[0]["fund_as_asset"], *result.iloc[0]["held_by_funds"]} == {
-            "FUND_A", "FUND_B"
-        }
-        assert result.iloc[0]["total_value"] == 180.0
+        assert set(result["CNPJ_FUNDO"]) == {"FUND_A", "FUND_B"}
+        assert result["total_value"].iloc[0] == 180.0
         assert result.iloc[0]["severity"] == "HIGH"
 
     def test_one_way_same_admin_holding_is_not_called_circular(self):
@@ -287,7 +323,7 @@ class TestFraudSchemeDetector:
         )
         elapsed = time.perf_counter() - started
         assert elapsed < 2.0
-        assert len(result) == 1
+        assert set(result["CNPJ_FUNDO"]) == {"F0000", "F0001"}
 
     def test_layered_funds_returns_dataframe(self):
         from src.analyzers.fraud_schemes import FraudSchemeDetector
@@ -375,6 +411,7 @@ class TestPeerComparisonAnalyzer:
         assert result["CNPJ_FUNDO"].tolist() == ["target"]
         assert result.iloc[0]["is_outlier"] == True  # noqa: E712
         assert result.iloc[0]["fraud_flag"] == "RETURNS_TOO_HIGH"
+        assert result.iloc[0]["severity"] in ("HIGH", "CRITICAL")
 
     def test_generate_peer_report_handles_outlier_summary(self):
         """Regression: report logging must use the comparison output schema."""
